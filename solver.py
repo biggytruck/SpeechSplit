@@ -57,7 +57,7 @@ class Solver(object):
         self.model_save_dir = os.path.join(self.config.root_dir, self.config.model_save_dir, self.config.experiment)
         if not os.path.exists(self.model_save_dir):
             os.makedirs(self.model_save_dir)
-        self.best_model_dir = os.path.join(self.config.root_dir, self.config.best_model_dir)
+        self.best_model_dir = os.path.join(self.config.root_dir, self.config.best_model_dir, self.config.experiment)
         if not os.path.exists(self.best_model_dir):
             os.makedirs(self.best_model_dir)
 
@@ -103,7 +103,7 @@ class Solver(object):
     def restore_model(self, resume_iters):
         print('Loading the trained models from step {}...'.format(resume_iters))
         if resume_iters == -1:
-            G_path = os.path.join(self.model_save_dir, '{}-G-best.ckpt'.format(self.name))
+            G_path = os.path.join(self.best_model_dir, '{}-G-best.ckpt'.format(self.name))
             g_checkpoint = torch.load(G_path, map_location=lambda storage, loc: storage)
             self.G.load_state_dict(g_checkpoint['model'])
         else:
