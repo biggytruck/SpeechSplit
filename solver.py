@@ -219,14 +219,14 @@ class Solver(object):
                 if self.use_tensorboard:
                     self.writer.add_scalar('G/val_g_loss_id', val_loss, i+1)
                 
-                if val_loss < self.min_val_loss[1]:
-                    self.min_val_loss = (i+1, val_loss)
-                    G_path = os.path.join(self.model_save_dir, '{}-G-best.ckpt'.format(self.name))
-                    torch.save({'model': self.G.state_dict()}, G_path)
-                    print('Best checkpoint so far: Iteration {}, Validation loss: {}'.format(self.min_val_loss[0], 
-                                                                                             self.min_val_loss[1]))
-                else:
-                    break
+                # if val_loss < self.min_val_loss[1]:
+                #     self.min_val_loss = (i+1, val_loss)
+                #     G_path = os.path.join(self.model_save_dir, '{}-G-best.ckpt'.format(self.name))
+                #     torch.save({'model': self.G.state_dict()}, G_path)
+                #     print('Best checkpoint so far: Iteration {}, Validation loss: {}'.format(self.min_val_loss[0], 
+                #                                                                              self.min_val_loss[1]))
+                # else:
+                #     break
 
         G_path = os.path.join(self.model_save_dir, '{}-G-best.ckpt'.format(self.name))
         shutil.copy2(G_path, self.best_model_dir)
