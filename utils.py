@@ -202,7 +202,7 @@ def pitch_shift(x, fs, n_steps, bins_per_octave=12):
 def random_warping(wav):
     # rate = choice([np.random.uniform(0.6, 0.8), np.random.uniform(1.2, 1.4)])
     # wav = time_stretch(wav, 16000, rate)
-    n_steps = choice([np.random.uniform(-3.5, -1.5), np.random.uniform(1.5, 3.5)])
+    n_steps = choice([np.random.uniform(5, 12), np.random.uniform(-5, -12)])
     wav = pitch_shift(wav, 16000, n_steps)
     return wav
 
