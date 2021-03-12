@@ -37,10 +37,10 @@ def main(config):
     
     # Bottleneck size settings
     settings = {
-                # 'default': [8,8,8,8,1,32],
-                # 'wide_C': [1,8,8,32,1,32],
-                # 'wide_R': [8,1,8,8,32,32],
-                'wide_CR': [1,1,8,32,32,32]
+                'default': [8,8,8,8,1,32],
+                'wide_C': [1,8,8,32,1,32],
+                'wide_R': [8,1,8,8,32,32]
+                # 'wide_CR': [1,1,8,32,32,32]
                 }
 
     for name, hparams in settings.items():
