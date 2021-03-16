@@ -173,7 +173,7 @@ class Solver(object):
             f0_org_intrp = quantize_f0_torch(x_f0_intrp[:,:,-1])[0] # [B, T, 257]
             x_f0_intrp_org = torch.cat((x_f0_intrp[:,:,:-1], f0_org_intrp), dim=-1) # [B, T, F+257]
             
-            x_identic, _ = self.G(x_f0_intrp_org, x_real_org_filt, emb_org)
+            x_identic = self.G(x_f0_intrp_org, x_real_org_filt, emb_org)
             g_loss_id = F.mse_loss(x_real_org, x_identic) 
            
             # Backward and optimize.
@@ -278,7 +278,7 @@ class Solver(object):
                 f0_org_quantized = quantize_f0_torch(f0_org)[0] # [B, T, 256]
                 x_f0 = torch.cat((x_real_org, f0_org_quantized), dim=-1) # [B, T, F+256]
             
-                x_identic, code_c = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
+                x_identic = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
                 g_loss_id = F.mse_loss(x_real_org, x_identic, reduction='sum')
             
                 # log testing loss.
@@ -329,7 +329,7 @@ class Solver(object):
                 f0_org_quantized = quantize_f0_torch(f0_org)[0] # [B, T, 256]
                 x_f0 = torch.cat((x_real_org, f0_org_quantized), dim=-1) # [B, T, F+256]
             
-                x_identic, code_c = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
+                x_identic = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
                 g_loss_id = F.mse_loss(x_real_org, x_identic, reduction='sum')
             
                 # log validation loss.
@@ -390,11 +390,11 @@ class Solver(object):
                 x_f0_woF = torch.cat((x_real_org, torch.zeros_like(f0_org_quantized)), dim=-1) # [B, T, F+256]
                 x_f0_woC = torch.cat((torch.zeros_like(x_real_org), f0_org_quantized), dim=-1) # [B, T, F+256]
 
-                x_identic, _ = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
-                x_identic_woF, _ = self.G(x_f0_woF, x_real_org_filt, emb_org, rr=False)
-                x_identic_woR, _ = self.G(x_f0, torch.zeros_like(x_real_org_filt), emb_org, rr=False)
-                x_identic_woC, _ = self.G(x_f0_woC, x_real_org_filt, emb_org, rr=False)
-                x_identic_woT, _ = self.G(x_f0, x_real_org_filt, torch.zeros_like(emb_org), rr=False)
+                x_identic = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
+                x_identic_woF = self.G(x_f0_woF, x_real_org_filt, emb_org, rr=False)
+                x_identic_woR = self.G(x_f0, torch.zeros_like(x_real_org_filt), emb_org, rr=False)
+                x_identic_woC = self.G(x_f0_woC, x_real_org_filt, emb_org, rr=False)
+                x_identic_woT = self.G(x_f0, x_real_org_filt, torch.zeros_like(emb_org), rr=False)
 
                 # plot output
                 melsp_gd_pad = x_real_org[0].cpu().numpy().T
