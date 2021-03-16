@@ -152,7 +152,7 @@ def phase_norm(phase):
 
 
 
-def time_stretch(data, rate=16000, alpha=1.0, robotic=False, frame=0.03, stride=0.01):
+def time_stretch(data, rate=16000, alpha=1.0, robotic=False, frame=0.03, stride=0.01, pre_pha=None):
     frames, N, Ra = windowing(data, rate, frame, stride)
     Rs = int(Ra * alpha)
     k = np.linspace(0, int(N/2), int(N/2+1))
@@ -160,8 +160,8 @@ def time_stretch(data, rate=16000, alpha=1.0, robotic=False, frame=0.03, stride=
 
     ana_delta_pha = phase_norm(k*2*np.pi*Ra/N)
     syn_delta_pha = phase_norm(k*2*np.pi*Rs/N)
-    ana_prev_pha = np.angle(fft_frames[0])
-    syn_prev_pha = np.angle(fft_frames[0])
+    ana_prev_pha = np.angle(fft_frames[0]) if pre_pha is None else pre_pha
+    syn_prev_pha = np.angle(fft_frames[0]) if pre_pha is None else pre_pha
 
     syn_frames = []
     first_mag = np.abs(fft_frames[0])
@@ -186,25 +186,32 @@ def time_stretch(data, rate=16000, alpha=1.0, robotic=False, frame=0.03, stride=
     for syn_f in syn_frames:
         output[concat_i:concat_i+len(syn_f)] += syn_f
         concat_i += Rs
-    output /= np.amax(output)
-    return output
+    # output /= np.amax(output)
+    return output, syn_curr_pha
 
 
 
-def pitch_shift(x, fs, n_steps, bins_per_octave=12):
+def pitch_shift(x, fs, n_steps, bins_per_octave=12, pre_pha=None):
 
     rate = 2.0 ** (-float(n_steps) / bins_per_octave)
     rate = 1/rate
-    x_shift = resample(time_stretch(x, alpha=rate), float(fs) * rate, fs)
-    return fix_length(x_shift, len(x))
+    x_stretch, new_pre_pha = time_stretch(x, alpha=rate, pre_pha=pre_pha)
+    x_shift = resample(x_stretch, float(fs) * rate, fs)
+    return fix_length(x_shift, len(x)), new_pre_pha
 
 
-def random_warping(wav):
+def random_warping(wav, fs=16000, trunc=[0.3, 0.6]):
     # rate = choice([np.random.uniform(0.6, 0.8), np.random.uniform(1.2, 1.4)])
     # wav = time_stretch(wav, 16000, rate)
-    n_steps = choice([np.random.uniform(5, 12), np.random.uniform(-5, -12)])
-    wav = pitch_shift(wav, 16000, n_steps)
-    return wav
+    i = 0
+    pre_pha = None
+    new_wav = np.array(wav)
+    while i < (len(wav)-int(fs*trunc[0])):
+        curr_len = int(fs * np.random.uniform(trunc[0], trunc[1]))
+        n_steps = choice([np.random.uniform(5, 12), np.random.uniform(-5, -12)])
+        new_wav[i:i+curr_len], pre_pha = pitch_shift(wav[i:i+curr_len], 16000, n_steps, pre_pha=pre_pha)
+        i += curr_len
+    return new_wav/np.max(new_wav)
 
 
 def get_dog_filter(n):
