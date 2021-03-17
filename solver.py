@@ -77,11 +77,14 @@ class Solver(object):
             
     def build_model(self):        
         self.G = Generator(self.config)
+        self.print_network(self.G, 'G')
+        gpu_count = torch.cuda.device_count()
+        if gpu_count > 1:
+            self.G = nn.DataParallel(self.G)
+        self.G.to(self.device)
+
         self.Interp = InterpLnr(self.config)
         self.g_optimizer = torch.optim.Adam(self.G.parameters(), self.g_lr, [self.beta1, self.beta2])
-        self.print_network(self.G, 'G')
-    
-        self.G.to(self.device)
         self.Interp.to(self.device)
 
         
@@ -105,11 +108,17 @@ class Solver(object):
         if resume_iters == -1:
             G_path = os.path.join(self.best_model_dir, '{}-G-best.ckpt'.format(self.name))
             g_checkpoint = torch.load(G_path, map_location=lambda storage, loc: storage)
-            self.G.load_state_dict(g_checkpoint['model'])
+            try:
+                self.G.load_state_dict(g_checkpoint['model'])
+            except RuntimeError:
+                self.G.module.load_state_dict(g_checkpoint['model'])
         else:
             G_path = os.path.join(self.model_save_dir, '{}-G-{}.ckpt'.format(self.name, resume_iters))
             g_checkpoint = torch.load(G_path, map_location=lambda storage, loc: storage)
-            self.G.load_state_dict(g_checkpoint['model'])
+            try:
+                self.G.load_state_dict(g_checkpoint['model'])
+            except RuntimeError:
+                self.G.module.load_state_dict(g_checkpoint['model'])
             self.g_optimizer.load_state_dict(g_checkpoint['optimizer'])
             self.g_lr = self.g_optimizer.param_groups[0]['lr']
         

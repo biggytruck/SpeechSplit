@@ -67,13 +67,14 @@ class Utterances(data.Dataset):
         spk_id_org = list_uttrs[0]
         emb_org = list_uttrs[1]
         wav_tmp, melsp, melsp_R, f0_org = list_uttrs[2]
-        if 'train' in self.pickle_name:
-            wav_tmp = random_warping(wav_tmp)
-            # wav_tmp = time_stretch(wav_tmp, robotic=True, frame=0.05, stride=0.025)
-            wav_tmp /= np.max(wav_tmp)
-            melsp_C = get_spmel(wav_tmp).astype(np.float32)
-        else:
-            melsp_C = melsp
+        # if 'train' in self.pickle_name:
+        #     wav_tmp = random_warping(wav_tmp)
+        #     # wav_tmp = time_stretch(wav_tmp, robotic=True, frame=0.05, stride=0.025)
+        #     wav_tmp /= np.max(wav_tmp)
+        #     melsp_C = get_spmel(wav_tmp).astype(np.float32)
+        # else:
+        #     melsp_C = melsp
+        melsp_C = melsp
         
         return spk_id_org, melsp, melsp_R, melsp_C, emb_org, f0_org
     
