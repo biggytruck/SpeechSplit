@@ -67,7 +67,7 @@ def get_config():
     parser.add_argument('--model_save_dir', type=str, default='run/models/')
     parser.add_argument('--best_model_dir', type=str, default='eval/models/')
     parser.add_argument('--sample_dir', type=str, default='run/samples/')
-    parser.add_argument('--experiment', type=str, default='speech-split2')
+    parser.add_argument('--experiment', type=str, default='speech-split2-no-pv')
 
     # Step size.
     parser.add_argument('--log_step', type=int, default=10)

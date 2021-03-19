@@ -33,12 +33,21 @@ def main(config):
     data_loader_list = get_loader(config)
     
     # Bottleneck size settings
+    # settings = {
+    #             'default': [8,8,8,8,1,32],
+    #             'wide_C': [1,8,8,32,1,32],
+    #             'wide_R': [8,1,8,8,32,32],
+    #             'wide_CR': [1,1,8,32,32,32]
+    #             }
     settings = {
-                'default': [8,8,8,8,1,32],
-                'wide_C': [1,8,8,32,1,32],
-                'wide_R': [8,1,8,8,32,32],
-                'wide_CR': [1,1,8,32,32,32]
+                'wide_CR_4_8': [4,1,8,8,32,32],
+                'wide_CR_4_16': [4,1,8,16,32,32],
+                'wide_CR_2_8': [2,1,8,8,32,32],
+                'wide_CR_2_16': [2,1,8,16,32,32],
+                'wide_CR_1_8': [1,1,8,8,32,32],
+                'wide_CR_1_16': [1,1,8,16,32,32],
                 }
+
 
     for name, hparams in settings.items():
 
