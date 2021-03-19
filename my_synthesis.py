@@ -5,15 +5,129 @@ from hparams import wavenet_hparams
 from wavenet_vocoder import builder
 import numpy as np
 import os
+import random
 from soundfile import read, write
 from utils import get_spmel, quantize_f0_numpy
 from model import Generator_3 as Generator
 from model import Generator_6 as F0_Converter
 from config import get_config
+from collections import OrderedDict
+import matplotlib.pyplot as plt
 
 use_cuda = torch.cuda.is_available()
 device = torch.device("cuda" if use_cuda else "cpu")
 config = get_config()
+spmel_dir = './assets/spmel/'
+spmel_filt_dir = './assets/spmel_filt/'
+raptf0_dir = './assets/raptf0/'
+model_dir = './run/models/speech-split2-no-pv'
+dst_dir = 'eval/wavs'
+
+def process_conversion_list(fname = 'spsp turk filenames.txt'):
+    wav_pairs = []
+    with open(fname, 'r') as f:
+        for line in f:
+            line_list = line.strip().split('_')
+            if len(line_list) == 4:
+                ctype = line_list[-1][-1]
+                src_dir = line_list[0]
+                tgt_dir = line_list[1]
+                src_id = int(src_dir[1:])-225
+                tgt_id = int(tgt_dir[1:])-225
+                src_wav_id = line_list[2][:3]
+                tgt_wav_id = line_list[2][3:] if len(line_list[2])>3 else line_list[2][:3]
+                src_path = src_dir+'/'+'_'.join([src_dir, src_wav_id, 'mic1.npy'])
+                tgt_path = tgt_dir+'/'+'_'.join([tgt_dir, tgt_wav_id, 'mic1.npy'])
+                output_name = src_dir+'_'+tgt_dir+'_'+src_wav_id+tgt_wav_id
+                wav_pairs.append((ctype, src_path, tgt_path, src_id, tgt_id, output_name))
+
+    return wav_pairs
+
+def load_spmel(fname):
+    spmel = np.load(os.path.join(spmel_dir, fname))
+    if len(spmel)%8 != 0:
+        len_pad = 8 - (len(spmel)%8)
+        spmel = np.pad(spmel, ((0,len_pad), (0,0)), 'constant')
+    spmel = spmel[np.newaxis, :, :]
+    
+    return spmel
+
+def load_spmel_filt(fname):
+    spmel_filt = np.load(os.path.join(spmel_filt_dir, fname))
+    if len(spmel_filt)%8 != 0:
+        len_pad = 8 - (len(spmel_filt)%8)
+        spmel_filt = np.pad(spmel_filt, ((0,len_pad), (0,0)), 'constant')
+    spmel_filt = spmel_filt[np.newaxis, :, :]
+    
+    return spmel_filt
+
+def load_raptf0(fname):
+    raptf0 = np.load(os.path.join(raptf0_dir, fname))
+    raptf0 = quantize_f0_numpy(raptf0)[0]
+    if len(raptf0)%8 != 0:
+        len_pad = 8 - (len(raptf0)%8)
+        raptf0 = np.pad(raptf0, ((0,len_pad), (0,0)), 'constant')
+    raptf0 = raptf0[np.newaxis, :, :]
+
+    return raptf0
+
+def get_spk_emb(spk_id):
+    spk_emb = torch.zeros((1, 82)).to(device)
+    spk_emb[0,src_id] = 1
+
+    return spk_emb
+
+def convert(model, ctype, src_path, tgt_path, src_id, tgt_id):
+    print(ctype, src_path, tgt_path, src_id, tgt_id)
+    if ctype == 'R':
+        spmel = load_spmel(src_path)
+        spmel_filt = load_spmel_filt(tgt_path)
+        raptf0 = load_raptf0(src_path)
+        spk_emb = get_spk_emb(src_id)
+    elif ctype == 'C':
+        spmel = load_spmel(tgt_path)
+        spmel_filt = load_spmel_filt(src_path)
+        raptf0 = load_raptf0(src_path)
+        spk_emb = get_spk_emb(src_id)
+    elif ctype == 'F':
+        spmel = load_spmel(src_path)
+        spmel_filt = load_spmel_filt(src_path)
+        raptf0 = load_raptf0(tgt_path)
+        spk_emb = get_spk_emb(src_id)
+    elif ctype == 'U':
+        spmel = load_spmel(src_path)
+        spmel_filt = load_spmel_filt(src_path)
+        raptf0 = load_raptf0(src_path)
+        spk_emb = get_spk_emb(tgt_id)
+    else:
+        spmel = load_spmel(src_path)
+        spmel_filt = load_spmel_filt(src_path)
+        raptf0 = load_raptf0(src_path)
+        spk_emb = get_spk_emb(src_id)
+
+    T = max(spmel.shape[1], spmel_filt.shape[1], raptf0.shape[1])
+    spmel = np.pad(spmel, ((0,0), (0,T-spmel.shape[1]), (0,0)), 'constant')
+    spmel_filt = np.pad(spmel_filt, ((0,0), (0,T-spmel_filt.shape[1]), (0,0)), 'constant')
+    raptf0 = np.pad(raptf0, ((0,0), (0,T-raptf0.shape[1]), (0,0)), 'constant')
+
+    spmel = torch.from_numpy(spmel).to(device)
+    spmel_filt = torch.from_numpy(spmel_filt).to(device)
+    raptf0 = torch.from_numpy(raptf0).to(device)
+    spmel_f0 = torch.cat((spmel, raptf0), dim=-1)
+    
+    rhythm = model.rhythm(spmel_filt)
+    content, pitch = model.content_pitch(spmel_f0, rr=False)
+    spmel_output = model.decode(content, rhythm, pitch, spk_emb, T).cpu().numpy()[0]
+
+    return spmel_output
+
+def draw_plot(spmel, title):
+    fig, ax1 = plt.subplots(1, 1)
+    ax1.set_title(title, fontsize=10)
+    im1 = ax1.imshow(spmel.T, aspect='auto')
+    plt.savefig(f'{title}.png', dpi=150)
+    plt.close(fig)
+        
 
 class Synthesizer(object):
 
@@ -77,20 +191,16 @@ class Synthesizer(object):
 
 
 if __name__ == '__main__':
-    spmel_dir = './assets/spmel/p225'
-    spmel_filt_dir = './assets/spmel_filt/p225'
-    raptf0_dir = './assets/raptf0/p225'
-    model_dir = './run/models/speech-split2'
-    dst_dir = 'eval/wavs'
+    
     fs = 16000
     s = Synthesizer()
     ckpt = torch.load('./run/models/wavenet_vocoder.pth')
     s.load_ckpt(ckpt)
     settings = {
-                # 'default': [8,8,8,8,1,32],
-                # 'wide_C': [1,8,8,32,1,32],
-                'wide_R': [8,1,8,8,32,32],
-                # 'wide_CR': [1,1,8,32,32,32]
+                # 'default': [8,8,8,8,1,32,400000],
+                # 'wide_C': [1,8,8,32,1,32,400000],
+                # 'wide_R': [8,1,8,8,32,32,400000],
+                'wide_CR': [1,1,8,32,32,32,250000]
                 }
 
     with torch.no_grad():
@@ -102,47 +212,39 @@ if __name__ == '__main__':
             config.freq_3 = params[2]
             config.dim_neck = params[3]
             config.dim_neck_2 = params[4]
-            config.dim_neck_3 = params[5] 
+            config.dim_neck_3 = params[5]
+            config.resume_iters = params[6]
         
             G = Generator(config).eval().to(device)
-            ckpt = torch.load(os.path.join(model_dir, name+'-G-400000.ckpt'))
-            G.load_state_dict(ckpt['model'])
-
-            for fname in sorted(os.listdir(spmel_dir))[:5]:
-                spmel = np.load(os.path.join(spmel_dir, fname))
-                if len(spmel)%8 != 0:
-                    len_pad = 8 - (len(spmel)%8)
-                    spmel = np.pad(spmel, ((0,len_pad), (0,0)), 'constant')
-                spmel = spmel[np.newaxis, :, :]
-                spmel = torch.from_numpy(spmel).to(device)
-
-                spmel_filt = np.load(os.path.join(spmel_filt_dir, fname))
-                if len(spmel_filt)%8 != 0:
-                    len_pad = 8 - (len(spmel_filt)%8)
-                    spmel_filt = np.pad(spmel_filt, ((0,len_pad), (0,0)), 'constant')
-                spmel_filt = spmel_filt[np.newaxis, :, :]
-                spmel_filt = torch.from_numpy(spmel_filt).to(device)
-
-                raptf0 = np.load(os.path.join(raptf0_dir, fname))
-                raptf0 = quantize_f0_numpy(raptf0)[0]
-                if len(raptf0)%8 != 0:
-                    len_pad = 8 - (len(raptf0)%8)
-                    raptf0 = np.pad(raptf0, ((0,len_pad), (0,0)), 'constant')
-                raptf0 = raptf0[np.newaxis, :, :]
-                raptf0 = torch.from_numpy(raptf0).to(device)
-
-                spmel_f0 = torch.cat((spmel, raptf0), dim=-1)
-                spk_emb = torch.zeros((1, 82)).to(device)
-                spk_emb[0,0] = 1
-
-                spmel_output = G(spmel_f0, spmel_filt, spk_emb, rr=False)[0].cpu().numpy()
-                wav = s.spect2wav(c=spmel_output)
-                write(os.path.join(dst_dir, name+'_'+os.path.splitext(fname)[0]+'.wav'), wav, fs)
-
-                del spmel, spmel_filt, raptf0
-
-            del G
-
-
-
+            ckpt = torch.load(os.path.join(model_dir, name+'-G-'+str(config.resume_iters)+'.ckpt'))
             
+            new_state_dict = OrderedDict()
+            for k, v in ckpt['model'].items():
+                new_state_dict[k[7:]] = v
+            G.load_state_dict(new_state_dict)
+
+            # wav_pairs = process_conversion_list()
+            # random.shuffle(wav_pairs)
+            # convert_cnt = 0
+            # for ctype, src_path, tgt_path, src_id, tgt_id, output_name in wav_pairs:
+            #     if ctype != 'U':
+            #         continue
+            #     if convert_cnt >= 5:
+            #         break
+            #     print(ctype, src_path, tgt_path, src_id, tgt_id, output_name)
+            #     spmel_output = convert(G, 'C', tgt_path, src_path, tgt_id, src_id)
+            #     wav = s.spect2wav(c=spmel_output)
+            #     write(os.path.join(dst_dir, name+'_'+output_name+'.wav'), wav, fs)
+            #     convert_cnt += 1
+
+            src_path = 'p225/p225_001_mic1.npy'
+            tgt_path = 'p226/p226_001_mic1.npy'
+            src_id = 0
+            tgt_id = 1
+
+            for ctype in ['R', 'C', 'F', 'U', 'None']:
+                spmel_output = convert(G, ctype, src_path, tgt_path, src_id, tgt_id)
+                draw_plot(spmel_output, ctype)
+                wav = s.spect2wav(c=spmel_output)
+                write(os.path.join(dst_dir, name+'_'+'p225_p226_001001_'+ctype+'.wav'), wav, fs)
+

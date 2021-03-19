@@ -312,12 +312,28 @@ class Generator_3(nn.Module):
         
         return mel_outputs
     
-    
     def rhythm(self, x_org):
         x_2 = x_org.transpose(2,1)
         codes_2 = self.encoder_2(x_2, None)
+        code_exp_2 = codes_2.repeat_interleave(self.freq_2, dim=1)
         
-        return codes_2
+        return code_exp_2
+
+    def content_pitch(self, x_f0, rr=True):
+        x_1 = x_f0.transpose(2,1)
+        codes_x, codes_f0 = self.encoder_1(x_1, rr)
+        code_exp_1 = codes_x.repeat_interleave(self.freq, dim=1)
+        code_exp_3 = codes_f0.repeat_interleave(self.freq_3, dim=1)
+        
+        return code_exp_1, code_exp_3
+
+    def decode(self, code_exp_1, code_exp_2, code_exp_3, c_trg, T):
+        encoder_outputs = torch.cat((code_exp_1, code_exp_2, code_exp_3, 
+                                     c_trg.unsqueeze(1).expand(-1,T,-1)), dim=-1)
+        
+        mel_outputs = self.decoder(encoder_outputs)
+        
+        return mel_outputs
 
     
     
