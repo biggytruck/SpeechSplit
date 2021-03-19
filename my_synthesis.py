@@ -238,7 +238,7 @@ if __name__ == '__main__':
             #     convert_cnt += 1
 
             src_path = 'p225/p225_001_mic1.npy'
-            tgt_path = 'p226/p226_001_mic1.npy'
+            tgt_path = 'p258/p258_001_mic1.npy'
             src_id = 0
             tgt_id = 1
 
@@ -246,5 +246,5 @@ if __name__ == '__main__':
                 spmel_output = convert(G, ctype, src_path, tgt_path, src_id, tgt_id)
                 draw_plot(spmel_output, ctype)
                 wav = s.spect2wav(c=spmel_output)
-                write(os.path.join(dst_dir, name+'_'+'p225_p226_001001_'+ctype+'.wav'), wav, fs)
+                write(os.path.join(dst_dir, name+'_'+'p225_p258_001001_'+ctype+'.wav'), wav, fs)
 
