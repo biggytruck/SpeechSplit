@@ -20,6 +20,7 @@ def get_config():
     # Data Preprocessing
     parser.add_argument('--make_metadata', type=str2bool, default=False)
     parser.add_argument('--make_spect_f0', type=str2bool, default=False)
+    parser.add_argument('--run_model', type=str2bool, default=True)
 
     # Dataloader
     parser.add_argument('--batch_size', type=int, default=16)

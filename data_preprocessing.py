@@ -73,15 +73,16 @@ def make_spect_f0(config):
 
 def make_metadata(config):
     targetDir_spmel = os.path.join(config.root_dir, config.spmel_dir)
-    targetDir_txt = os.path.join(config.root_dir, config.txt_dir)
     targetDir_meta = os.path.join(config.root_dir, config.meta_dir)
 
     if not os.path.exists(targetDir_meta):
         os.mkdir(targetDir_meta)
 
-    dirName, subdirList, _ = next(os.walk(targetDir_spmel))
+    dirName, _, _ = next(os.walk(targetDir_spmel))
     print('Found directory: %s' % dirName)
-    test_wav_ids = get_common_wav_ids(targetDir_txt)
+    test_data, test_data_by_ctype = get_test_data_set()
+    with open(os.path.join(targetDir_meta, 'test_by_ctype.pkl'), 'wb') as handle:
+        pickle.dump(test_data_by_ctype, handle)
 
     train_dataset = []
     val_dataset = []
@@ -90,43 +91,44 @@ def make_metadata(config):
     val_plot_dataset = []
     test_plot_dataset = []
 
-    # use the first 20 speakers only
-    for i, speaker in enumerate(sorted(subdirList)[:20]):
-        print('Processing speaker: %s' % speaker)
+    with open('spk_list.txt', 'r') as f:
+        for line in f:
+            speaker, i = line.strip().split(' ')
+            print('Processing speaker: %s; Speaker ID: %s' %(speaker, i))
 
-        utterances = []
-        utterances.append(speaker)
-        _, _, fileList = next(os.walk(os.path.join(dirName,speaker)))
-        
-        # may use generalized speaker embedding for zero-shot conversion
-        spkid = np.zeros((82,), dtype=np.float32)
-        spkid[i] = 1.0
-        utterances.append(spkid)
+            utterances = []
+            utterances.append(speaker)
+            _, _, fileList = next(os.walk(os.path.join(dirName,speaker)))
+            
+            # may use generalized speaker embedding for zero-shot conversion
+            spkid = np.zeros((82,), dtype=np.float32)
+            spkid[int(i)] = 1.0
+            utterances.append(spkid)
 
-        # create file list
-        fileList = sorted(fileList)
-        for fileName in fileList:
-            utterances.append(os.path.join(speaker,fileName))
+            # create file list
+            fileList = sorted(fileList)
+            for fileName in fileList:
+                utterances.append(os.path.join(speaker,fileName))
 
-        # train/val/test split
-        spk_id = utterances[0]
-        spk_emb = utterances[1]
-        train_val_utterances, test_utterances = [], []
-        for uttr in utterances[2:]:
-            if any(test_wav_id in uttr for test_wav_id in test_wav_ids):
-                test_utterances.append((spk_id, spk_emb, uttr))
-            else:
-                train_val_utterances.append((spk_id, spk_emb, uttr))
-        train_utterances, val_utterances = train_test_split(train_val_utterances, test_size=0.1, random_state=42)
-        train_dataset += train_utterances
-        val_dataset += val_utterances
-        test_dataset += test_utterances
+            # train/val/test split
+            spk_id = utterances[0]
+            spk_emb = utterances[1]
+            train_val_utterances, test_utterances = [], []
+            for uttr in utterances[2:]:
+                if uttr not in test_data:
+                    train_val_utterances.append((spk_id, spk_emb, uttr))
+                else:
+                    test_utterances.append((spk_id, spk_emb, uttr))
+            train_utterances, val_utterances = train_test_split(train_val_utterances, test_size=0.1, random_state=42)
+            train_dataset += train_utterances
+            val_dataset += val_utterances
+            test_dataset += test_utterances
 
-        # spectrogram for plots
-        if speaker == 'p225':
-            train_plot_dataset += [train_utterances[0]]
-            val_plot_dataset += [val_utterances[0]]
-            test_plot_dataset += [test_utterances[0]]
+            # spectrogram for plots
+            if speaker == 'p225':
+                train_plot_dataset += [train_utterances[0]]
+                val_plot_dataset += [val_utterances[0]]
+                test_plot_dataset += [test_utterances[0]]
             
     pickleList = ['train.pkl', 'val.pkl', 'test.pkl', 'train_plot.pkl', 'val_plot.pkl', 'test_plot.pkl']
     datasetList = [train_dataset, val_dataset, test_dataset, train_plot_dataset, val_plot_dataset, test_plot_dataset]

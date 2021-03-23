@@ -288,3 +288,28 @@ def get_common_wav_ids(txt_dir):
         wav_ids += v
 
     return wav_ids
+
+def get_test_data_set(fname = 'turk_list.txt'):
+    test_data = set()
+    test_data_by_ctype = dict()
+    curr_key = ''
+    with open(fname, 'r') as f:
+        for line in f:
+            line_list = line.strip().split('_')
+            if line_list[0] in ['P', 'F', 'U']:
+                test_data_by_ctype[line_list[0]] = set()
+                curr_key = line_list[0]
+            elif len(line_list) == 4:
+                src_dir = line_list[0]
+                tgt_dir = line_list[1]
+                wav_id = line_list[2][:3]
+                src_path1 = src_dir+'/'+'_'.join([src_dir, wav_id, 'mic1.npy'])
+                src_path2 = src_dir+'/'+'_'.join([src_dir, wav_id, 'mic2.npy'])
+                tgt_path1 = tgt_dir+'/'+'_'.join([tgt_dir, wav_id, 'mic1.npy'])
+                tgt_path2 = tgt_dir+'/'+'_'.join([tgt_dir, wav_id, 'mic2.npy'])
+                for pairs in [(src_path1, tgt_path1), (src_path2, tgt_path2)]:
+                    test_data.add(pairs[0])
+                    test_data.add(pairs[1])
+                    test_data_by_ctype[curr_key].add(pairs)
+
+    return test_data, test_data_by_ctype
