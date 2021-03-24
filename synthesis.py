@@ -6,6 +6,7 @@ from wavenet_vocoder import builder
 import numpy as np
 import os
 import random
+import pickle
 from soundfile import read, write
 from utils import get_spmel, quantize_f0_numpy
 from model import Generator_3 as Generator
@@ -17,11 +18,13 @@ import matplotlib.pyplot as plt
 use_cuda = torch.cuda.is_available()
 device = torch.device("cuda" if use_cuda else "cpu")
 config = get_config()
-spmel_dir = './assets/spmel/'
-spmel_filt_dir = './assets/spmel_filt/'
-raptf0_dir = './assets/raptf0/'
-model_dir = './run/models/speech-split2-find-content-optimal/'
-dst_dir = 'eval/wavs'
+spmel_dir = 'eval/assets/spmel/'
+spmel_filt_dir = 'eval/assets/spmel_filt/'
+raptf0_dir = 'eval/assets/raptf0/'
+model_dir = 'run/models/speech-split2-find-content-optimal/'
+result_dir = 'eval/results'
+plot_dir = 'eval/plots'
+test_data_by_ctype = pickle.load(open('eval/assets/test_data_by_ctype.pkl', 'rb'))
 
 def load_spmel(fname):
     spmel = np.load(os.path.join(spmel_dir, fname))
@@ -101,11 +104,10 @@ def convert(model, ctype, src_path, tgt_path, src_id, tgt_id):
 
     return spmel_output
 
-def draw_plot(spmel, title):
+def draw_plot(spmel, save_path):
     fig, ax1 = plt.subplots(1, 1)
-    ax1.set_title(title, fontsize=10)
     im1 = ax1.imshow(spmel.T, aspect='auto')
-    plt.savefig(f'{title}.png', dpi=150)
+    plt.savefig(f'{save_path}.png', dpi=150)
     plt.close(fig)
         
 
@@ -169,7 +171,6 @@ class Synthesizer(object):
         return self.spect2wav(c=spect)
 
 
-
 if __name__ == '__main__':
     
     fs = 16000
@@ -181,52 +182,41 @@ if __name__ == '__main__':
                 'wide_CR_4_16': [4,1,8,16,32,32,500000],
                 'wide_CR_2_8': [2,1,8,8,32,32,500000],
                 'wide_CR_2_16': [2,1,8,16,32,32,500000],
-                # 'wide_CR_1_8': [1,1,8,8,32,32,500000],
-                # 'wide_CR_1_16': [1,1,8,16,32,32,500000],
+                'wide_CR_1_8': [1,1,8,8,32,32,500000],
+                'wide_CR_1_16': [1,1,8,16,32,32,500000],
                 }
 
     with torch.no_grad():
-        for name, params in settings.items():
+        for model_name in ['spsp1', 'spsp2']:
+            for name, params in settings.items():
 
-            config.name = name
-            config.freq = params[0]
-            config.freq_2 = params[1]
-            config.freq_3 = params[2]
-            config.dim_neck = params[3]
-            config.dim_neck_2 = params[4]
-            config.dim_neck_3 = params[5]
-            config.resume_iters = params[6]
-        
-            G = Generator(config).eval().to(device)
-            ckpt = torch.load(os.path.join(model_dir, name+'-G-'+str(config.resume_iters)+'.ckpt'))
+                config.name = name
+                config.freq = params[0]
+                config.freq_2 = params[1]
+                config.freq_3 = params[2]
+                config.dim_neck = params[3]
+                config.dim_neck_2 = params[4]
+                config.dim_neck_3 = params[5]
+                config.resume_iters = params[6]
             
-            new_state_dict = OrderedDict()
-            for k, v in ckpt['model'].items():
-                new_state_dict[k[7:]] = v
-            G.load_state_dict(new_state_dict)
+                G = Generator(config).eval().to(device)
+                ckpt = torch.load(os.path.join(model_dir, name+'-G-'+str(config.resume_iters)+'.ckpt'))
+                
+                new_state_dict = OrderedDict()
+                for k, v in ckpt['model'].items():
+                    new_state_dict[k[7:]] = v
+                G.load_state_dict(new_state_dict)
 
-            # wav_pairs = process_conversion_list()
-            # random.shuffle(wav_pairs)
-            # convert_cnt = 0
-            # for ctype, src_path, tgt_path, src_id, tgt_id, output_name in wav_pairs:
-            #     if ctype != 'U':
-            #         continue
-            #     if convert_cnt >= 5:
-            #         break
-            #     print(ctype, src_path, tgt_path, src_id, tgt_id, output_name)
-            #     spmel_output = convert(G, 'C', tgt_path, src_path, tgt_id, src_id)
-            #     wav = s.spect2wav(c=spmel_output)
-            #     write(os.path.join(dst_dir, name+'_'+output_name+'.wav'), wav, fs)
-            #     convert_cnt += 1
+                for ctype in test_data_by_ctype.keys():
+                    pairs = test_data_by_ctype[ctype]
+                    for (src_path, src_id, src_name), (tgt_path, tgt_id, tgt_name) in pairs[:20]:
+                        result_path = os.path.join(result_dir, model_name, ctype, '_'.join([src_name, tgt_name])+'.wav')
+                        plot_path = os.path.join(plot_dir, model_name, ctype, '_'.join([src_name, tgt_name])+'.png')
 
-            src_path = 'p225/p225_001_mic1.npy'
-            tgt_path = 'p258/p258_001_mic1.npy'
-            src_id = 0
-            tgt_id = 1
+                        spmel_output = convert(G, ctype, src_path, tgt_path, src_id, tgt_id)
+                        wav = s.spect2wav(c=spmel_output)
+                        write(result_path, wav, fs)
+                        draw_plot(spmel_output, plot_path))
 
-            for ctype in ['R', 'C', 'F', 'U', 'None']:
-                spmel_output = convert(G, ctype, src_path, tgt_path, src_id, tgt_id)
-                draw_plot(spmel_output, ctype)
-                wav = s.spect2wav(c=spmel_output)
-                write(os.path.join(dst_dir, name+'_'+'p225_p258_001001_'+ctype+'.wav'), wav, fs)
+                        # break
 

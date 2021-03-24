@@ -143,8 +143,8 @@ class Evaluator(object):
 if __name__ == '__main__':
     gen = 'M'
     e = Evaluator()
-    wav_dir = './assets/wavs/p225/'
-    txt_dir = './assets/txt/p225/'
+    wav_dir = 'assets/wavs/p225/'
+    txt_dir = 'assets/txt/p225/'
     wer = []
     for fname in os.listdir(wav_dir):
         wav_file = os.path.join(wav_dir, fname)

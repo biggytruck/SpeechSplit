@@ -81,8 +81,10 @@ def make_metadata(config):
     dirName, _, _ = next(os.walk(targetDir_spmel))
     print('Found directory: %s' % dirName)
     test_data, test_data_by_ctype = get_test_data_set()
-    with open(os.path.join(targetDir_meta, 'test_by_ctype.pkl'), 'wb') as handle:
-        pickle.dump(test_data_by_ctype, handle)
+    p = 'eval/assets/'
+    if os.path.isdir(p):
+        with open(os.path.join(p, 'test_data_by_ctype.pkl'), 'wb') as handle:
+            pickle.dump(test_data_by_ctype, handle)
 
     train_dataset = []
     val_dataset = []
