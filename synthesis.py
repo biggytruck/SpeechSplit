@@ -22,7 +22,6 @@ wav_dir = 'eval/assets/wavs/'
 spmel_dir = 'eval/assets/spmel/'
 spmel_filt_dir = 'eval/assets/spmel_filt/'
 raptf0_dir = 'eval/assets/raptf0/'
-# model_dir = 'run/models/speech-split2-find-content-optimal/'
 model_dir = 'eval/models/'
 result_dir = 'eval/results'
 plot_dir = 'eval/plots'
@@ -204,7 +203,7 @@ if __name__ == '__main__':
     ctype_list = [
         # 'F',
         'R',
-        # 'U',
+        'U',
     ]
 
     with torch.no_grad():
@@ -252,7 +251,7 @@ if __name__ == '__main__':
 
                         plot_path = os.path.join(plot_dir, model_type, model_name, ctype, fname+'.png')
                         draw_plot(src_spmel, tgt_spmel, cvt_spmel, plot_path)
-                        break
+                        # break
 
                 # src_spmel = np.load(os.path.join(spmel_dir, 'p225/p225_003001.npy'))
                 # src_save_path = os.path.join(result_dir, 'spsp2', 'C', 'p225_003001_p225_003002_s.wav')

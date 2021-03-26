@@ -1,11 +1,16 @@
 import os
 import pickle
+from collections import OrderedDict
 
 from soundfile import read
 import jiwer
 from google.cloud import speech
-from utils import extract_f0, dict2json
+from utils import extract_f0, dict2json, filter_wav, get_spmel
+from model import D_VECTOR
 import numpy as np
+from numpy.random import RandomState
+from sklearn.metrics.pairwise import cosine_similarity
+import torch
 
 from run_SylNet import get_speaking_rate
 
@@ -19,6 +24,14 @@ model_dir = 'run/models/speech-split2-find-content-optimal/'
 result_dir = 'eval/results'
 plot_dir = 'eval/plots'
 spk2gen = pickle.load(open('eval/assets/spk2gen.pkl', 'rb'))
+C = D_VECTOR(dim_input=80, dim_cell=768, dim_emb=256).eval().cuda()
+c_checkpoint = torch.load('eval/assets/3000000-BL.ckpt')
+new_state_dict = OrderedDict()
+for key, val in c_checkpoint['model_b'].items():
+    new_key = key[7:]
+    new_state_dict[new_key] = val
+C.load_state_dict(new_state_dict)
+prng = RandomState(1)
 
 class Evaluator(object):
 
@@ -201,6 +214,50 @@ class Evaluator(object):
                 'tgt_gpe': tgt_gpe, \
                 'tgt_ffe': tgt_ffe}
 
+    def evaluate_timbre(self, fname_dir, fname_list):
+
+        src_cos_sim = 0
+
+        for fname in fname_list:
+
+            src_name = os.path.join(fname_dir, fname+'_s.wav')
+            src_wav, fs = read(src_name)
+            src_wav = filter_wav(src_wav, prng)
+            src_spmel = get_spmel(src_wav).astype(np.float32)
+            src_spmel = torch.from_numpy(src_spmel[np.newaxis, :, :]).cuda()
+            src_emb = C(src_spmel).detach().cpu().numpy()
+
+            cvt_name = os.path.join(fname_dir, fname+'_c.wav')
+            cvt_wav, fs = read(cvt_name)
+            cvt_wav = filter_wav(cvt_wav, prng)
+            cvt_spmel = get_spmel(cvt_wav).astype(np.float32)
+            cvt_spmel = torch.from_numpy(cvt_spmel[np.newaxis, :, :]).cuda()
+            cvt_emb = C(cvt_spmel).detach().cpu().numpy()
+
+            src_cos_sim += cosine_similarity(src_emb, cvt_emb)[0]
+        
+        tgt_cos_sim = 0
+
+        for fname in fname_list:
+
+            tgt_name = os.path.join(fname_dir, fname+'_t.wav')
+            tgt_wav, fs = read(tgt_name)
+            tgt_wav = filter_wav(tgt_wav, prng)
+            tgt_spmel = get_spmel(tgt_wav).astype(np.float32)
+            tgt_spmel = torch.from_numpy(tgt_spmel[np.newaxis, :, :]).cuda()
+            tgt_emb = C(tgt_spmel).detach().cpu().numpy()
+
+            cvt_name = os.path.join(fname_dir, fname+'_c.wav')
+            cvt_wav, fs = read(cvt_name)
+            cvt_wav = filter_wav(cvt_wav, prng)
+            cvt_spmel = get_spmel(cvt_wav).astype(np.float32)
+            cvt_spmel = torch.from_numpy(cvt_spmel[np.newaxis, :, :]).cuda()
+            cvt_emb = C(cvt_spmel).detach().cpu().numpy()
+
+            tgt_cos_sim += cosine_similarity(tgt_emb, cvt_emb)[0]
+
+        return {'src_cos_smi': src_cos_sim.item()/len(fname_list), \
+                'tgt_cos_smi': tgt_cos_sim.item()/len(fname_list)}
 
 if __name__ == '__main__':
 
@@ -221,7 +278,7 @@ if __name__ == '__main__':
     ctype_list = [
         # 'F',
         'R',
-        # 'U',
+        'U',
     ]
 
     # initialize metrics
@@ -239,7 +296,7 @@ if __name__ == '__main__':
             for ctype in ctype_list:
                 pairs = test_data_by_ctype[ctype]
                 fname_list = []
-                for (src_name, src_id), (tgt_name, tgt_id) in pairs[:5]:
+                for (src_name, src_id), (tgt_name, tgt_id) in pairs:
                     fname_list.append(src_name.split('/')[-1]+'_'+tgt_name.split('/')[-1])
                 fname_dir = os.path.join(result_dir, model_type, model_name, ctype)
 
@@ -247,5 +304,7 @@ if __name__ == '__main__':
                     metrics[model_type][model_name][ctype] = e.evaluate_pitch(fname_dir, fname_list)
                 elif ctype == 'R':
                     metrics[model_type][model_name][ctype] = e.evaluate_rhythm(fname_dir)
+                elif ctype == 'U':
+                    metrics[model_type][model_name][ctype] = e.evaluate_timbre(fname_dir, fname_list)
 
     dict2json(metrics, 'metrics.json')
