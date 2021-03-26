@@ -2,6 +2,7 @@ import copy
 import torch
 import numpy as np
 import os
+import json
 
 from collections import OrderedDict
 from random import choice
@@ -16,6 +17,11 @@ from math import pi, sqrt, exp
 
 mel_basis = mel(16000, 1024, fmin=90, fmax=7600, n_mels=80).T
 min_level = np.exp(-100 / 20 * np.log(10))
+
+def dict2json(d, file_w):
+    j = json.dumps(d, indent=4)
+    with open(file_w, 'w') as w_f:
+        w_f.write(j)
 
 def butter_highpass(cutoff, fs, order=5):
     nyq = 0.5 * fs
@@ -311,8 +317,8 @@ def get_test_data_set(turk_list_fname = 'turk_list.txt', spk_list_fname = 'spk_l
                 wav_id = line_list[2]
                 src_name = '_'.join([src_dir, wav_id])
                 tgt_name = '_'.join([tgt_dir, wav_id])
-                item = ((src_dir+'/'+src_name+'.npy', spk2id[src_dir], src_name), \
-                        (tgt_dir+'/'+tgt_name+'.npy', spk2id[tgt_dir], tgt_name))
+                item = ((src_dir+'/'+src_name, spk2id[src_dir]), \
+                        (tgt_dir+'/'+tgt_name, spk2id[tgt_dir]))
                 if not test_data_by_ctype[curr_key] or item != test_data_by_ctype[curr_key][-1]:
                     test_data_by_ctype[curr_key].append(item)
                 src_path1 = src_dir+'/'+'_'.join([src_dir, wav_id[:3], 'mic1.npy'])
