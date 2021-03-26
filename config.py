@@ -59,7 +59,8 @@ def get_config():
     parser.add_argument('--resume_iters', type=int, default=None, help='resume training from this step')
 
     # Miscellaneous.
-    parser.add_argument('--name', type=str, default='default')
+    parser.add_argument('--model_name', type=str, default='default')
+    parser.add_argument('--model_type', type=str, default='G')
     parser.add_argument('--use_tensorboard', type=str2bool, default=False)
     parser.add_argument('--device_id', type=int, default=0)
 
@@ -68,7 +69,7 @@ def get_config():
     parser.add_argument('--model_save_dir', type=str, default='run/models/')
     parser.add_argument('--best_model_dir', type=str, default='eval/models/')
     parser.add_argument('--sample_dir', type=str, default='run/samples/')
-    parser.add_argument('--experiment', type=str, default='speech-split2-no-pv')
+    parser.add_argument('--experiment', type=str, default='spsp2')
 
     # Step size.
     parser.add_argument('--log_step', type=int, default=10)

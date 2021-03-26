@@ -42,22 +42,24 @@ class Solver(object):
         self.resume_iters = self.config.resume_iters
         
         # Miscellaneous.
-        self.name = self.config.name
+        self.experiment = self.config.experiment
+        self.model_name = self.config.model_name
+        self.model_type = self.config.model_type
         self.use_tensorboard = self.config.use_tensorboard
         self.use_cuda = torch.cuda.is_available()
         self.device = torch.device('cuda:{}'.format(self.config.device_id) if self.use_cuda else 'cpu')
 
         # Directories.
-        self.log_dir = os.path.join(self.config.root_dir, self.config.log_dir, self.config.experiment)
+        self.log_dir = os.path.join(self.config.root_dir, self.config.log_dir, self.experiment)
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
-        self.sample_dir = os.path.join(self.config.root_dir, self.config.sample_dir, self.config.experiment)
+        self.sample_dir = os.path.join(self.config.root_dir, self.config.sample_dir, self.experiment)
         if not os.path.exists(self.sample_dir):
             os.makedirs(self.sample_dir)
-        self.model_save_dir = os.path.join(self.config.root_dir, self.config.model_save_dir, self.config.experiment)
+        self.model_save_dir = os.path.join(self.config.root_dir, self.config.model_save_dir, self.experiment)
         if not os.path.exists(self.model_save_dir):
             os.makedirs(self.model_save_dir)
-        self.best_model_dir = os.path.join(self.config.root_dir, self.config.best_model_dir, self.config.experiment)
+        self.best_model_dir = os.path.join(self.config.root_dir, self.config.best_model_dir, self.experiment)
         if not os.path.exists(self.best_model_dir):
             os.makedirs(self.best_model_dir)
 
@@ -106,14 +108,14 @@ class Solver(object):
     def restore_model(self, resume_iters):
         print('Loading the trained models from step {}...'.format(resume_iters))
         if resume_iters == -1:
-            G_path = os.path.join(self.best_model_dir, '{}-G-best.ckpt'.format(self.name))
+            G_path = os.path.join(self.best_model_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
             g_checkpoint = torch.load(G_path, map_location=lambda storage, loc: storage)
             try:
                 self.G.load_state_dict(g_checkpoint['model'])
             except RuntimeError:
                 self.G.module.load_state_dict(g_checkpoint['model'])
         else:
-            G_path = os.path.join(self.model_save_dir, '{}-G-{}.ckpt'.format(self.name, resume_iters))
+            G_path = os.path.join(self.model_save_dir, '{}-{}-{}.ckpt'.format(self.model_name, self.model_type, resume_iters))
             g_checkpoint = torch.load(G_path, map_location=lambda storage, loc: storage)
             try:
                 self.G.load_state_dict(g_checkpoint['model'])
@@ -182,7 +184,12 @@ class Solver(object):
             f0_org_intrp = quantize_f0_torch(x_f0_intrp[:,:,-1])[0] # [B, T, 257]
             x_f0_intrp_org = torch.cat((x_f0_intrp[:,:,:-1], f0_org_intrp), dim=-1) # [B, T, F+257]
             
-            x_identic = self.G(x_f0_intrp_org, x_real_org_filt, emb_org)
+            if self.experiment == 'spsp1':
+                x_identic = self.G(x_f0_intrp_org, x_real_org, emb_org)
+            elif self.experiment == 'spsp2':
+                x_identic = self.G(x_f0_intrp_org, x_real_org_filt, emb_org)
+            else:
+                raise ValueError
             g_loss_id = F.mse_loss(x_real_org, x_identic) 
            
             # Backward and optimize.
@@ -215,7 +222,7 @@ class Solver(object):
                         
             # Save model checkpoints and the best one if possible
             if (i+1) % self.model_save_step == 0:
-                G_path = os.path.join(self.model_save_dir, '{}-G-{}.ckpt'.format(self.name, i+1))
+                G_path = os.path.join(self.model_save_dir, '{}-{}-{}.ckpt'.format(self.model_name, self.model_type, i+1))
                 torch.save({'model': self.G.state_dict(),
                             'optimizer': self.g_optimizer.state_dict()}, G_path)
 
@@ -230,16 +237,16 @@ class Solver(object):
                 
                 if val_loss < self.min_val_loss[1]:
                     self.min_val_loss = (i+1, val_loss)
-                    G_path = os.path.join(self.model_save_dir, '{}-G-best.ckpt'.format(self.name))
+                    G_path = os.path.join(self.model_save_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
                     torch.save({'model': self.G.state_dict()}, G_path)
                     print('Best checkpoint so far: Iteration {}, Validation loss: {}'.format(self.min_val_loss[0], 
                                                                                              self.min_val_loss[1]))
                 # else:
                 #     break
 
-        G_path = os.path.join(self.model_save_dir, '{}-G-best.ckpt'.format(self.name))
+        G_path = os.path.join(self.model_save_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
         shutil.copy2(G_path, self.best_model_dir)
-        print('Best checkpoint for model {}: Iteration {}, Validation loss: {}'.format(self.name,
+        print('Best checkpoint for model {}: Iteration {}, Validation loss: {}'.format(self.model_name,
                                                                                        self.min_val_loss[0], 
                                                                                        self.min_val_loss[1]))
 
@@ -287,7 +294,12 @@ class Solver(object):
                 f0_org_quantized = quantize_f0_torch(f0_org)[0] # [B, T, 256]
                 x_f0 = torch.cat((x_real_org, f0_org_quantized), dim=-1) # [B, T, F+256]
             
-                x_identic = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
+                if self.experiment == 'spsp1':
+                    x_identic = self.G(x_f0, x_real_org, emb_org, rr=False)
+                elif self.experiment == 'spsp2':
+                    x_identic = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
+                else:
+                    raise ValueError
                 g_loss_id = F.mse_loss(x_real_org, x_identic, reduction='sum')
             
                 # log testing loss.
@@ -338,7 +350,12 @@ class Solver(object):
                 f0_org_quantized = quantize_f0_torch(f0_org)[0] # [B, T, 256]
                 x_f0 = torch.cat((x_real_org, f0_org_quantized), dim=-1) # [B, T, F+256]
             
-                x_identic = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
+                if self.experiment == 'spsp1':
+                    x_identic = self.G(x_f0, x_real_org, emb_org, rr=False)
+                elif self.experiment == 'spsp2':
+                    x_identic = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
+                else:
+                    raise ValueError
                 g_loss_id = F.mse_loss(x_real_org, x_identic, reduction='sum')
             
                 # log validation loss.
@@ -399,11 +416,20 @@ class Solver(object):
                 x_f0_woF = torch.cat((x_real_org, torch.zeros_like(f0_org_quantized)), dim=-1) # [B, T, F+256]
                 x_f0_woC = torch.cat((torch.zeros_like(x_real_org), f0_org_quantized), dim=-1) # [B, T, F+256]
 
-                x_identic = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
-                x_identic_woF = self.G(x_f0_woF, x_real_org_filt, emb_org, rr=False)
-                x_identic_woR = self.G(x_f0, torch.zeros_like(x_real_org_filt), emb_org, rr=False)
-                x_identic_woC = self.G(x_f0_woC, x_real_org_filt, emb_org, rr=False)
-                x_identic_woT = self.G(x_f0, x_real_org_filt, torch.zeros_like(emb_org), rr=False)
+                if self.experiment == 'spsp1':
+                    x_identic = self.G(x_f0, x_real_org, emb_org, rr=False)
+                    x_identic_woF = self.G(x_f0_woF, x_real_org, emb_org, rr=False)
+                    x_identic_woR = self.G(x_f0, torch.zeros_like(x_real_org), emb_org, rr=False)
+                    x_identic_woC = self.G(x_f0_woC, x_real_org, emb_org, rr=False)
+                    x_identic_woT = self.G(x_f0, x_real_org, torch.zeros_like(emb_org), rr=False)
+                elif self.experiment == 'spsp2':
+                    x_identic = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
+                    x_identic_woF = self.G(x_f0_woF, x_real_org_filt, emb_org, rr=False)
+                    x_identic_woR = self.G(x_f0, torch.zeros_like(x_real_org_filt), emb_org, rr=False)
+                    x_identic_woC = self.G(x_f0_woC, x_real_org_filt, emb_org, rr=False)
+                    x_identic_woT = self.G(x_f0, x_real_org_filt, torch.zeros_like(emb_org), rr=False)
+                else:
+                    raise ValueError
 
                 # plot output
                 melsp_gd_pad = x_real_org[0].cpu().numpy().T
@@ -429,7 +455,7 @@ class Solver(object):
                 im4 = ax4.imshow(melsp_woR, aspect='auto', vmin=min_value, vmax=max_value)
                 im5 = ax5.imshow(melsp_woF, aspect='auto', vmin=min_value, vmax=max_value)
                 im6 = ax6.imshow(melsp_woT, aspect='auto', vmin=min_value, vmax=max_value)
-                plt.savefig(f'{self.sample_dir}/{self.name}_{mode}_output_{spk_id_org[0]}_{i+1}.png', dpi=150)
+                plt.savefig(f'{self.sample_dir}/{self.model_name}_{mode}_output_{spk_id_org[0]}_{i+1}.png', dpi=150)
                 plt.close(fig)
 
         self.G = self.G.train()

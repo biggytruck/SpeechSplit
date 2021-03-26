@@ -210,7 +210,7 @@ if __name__ == '__main__':
         for model_type in model_type_list:
             for model_name, params in settings.items():
 
-                config.name = model_name
+                config.model_name = model_name
                 config.freq = params[0]
                 config.freq_2 = params[1]
                 config.freq_3 = params[2]
