@@ -213,6 +213,8 @@ class Encoder_7(nn.Module):
         f0 = x_f0[:, :, self.dim_enc:]
         
         # code 1
+        self.lstm_1.flatten_parameters()
+        self.lstm_2.flatten_parameters()
         x = self.lstm_1(x)[0]
         f0 = self.lstm_2(f0)[0]
         
@@ -250,6 +252,7 @@ class Decoder_3(nn.Module):
 
     def forward(self, x):
         
+        self.lstm.flatten_parameters()
         outputs, _ = self.lstm(x)
         
         decoder_output = self.linear_projection(outputs)
@@ -274,6 +277,7 @@ class Decoder_4(nn.Module):
 
     def forward(self, x):
         
+        self.lstm.flatten_parameters()
         outputs, _ = self.lstm(x)
         
         decoder_output = self.linear_projection(outputs)
