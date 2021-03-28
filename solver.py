@@ -189,16 +189,16 @@ class Solver(object):
                     x_identic = self.model(x_f0_intrp_org, x_real_org, emb_org)
                     loss_id = F.mse_loss(x_identic, x_real_org) 
                 else:
-                    x_identic = self.model(x_real_org, f0_org_intrp)
-                    f0_org_quantized = quantize_f0_torch(f0_org)[1]
+                    x_identic = self.model(x_real_org, f0_org_intrp).view(-1, self.config.dim_f0)
+                    f0_org_quantized = quantize_f0_torch(f0_org)[1].view(-1)
                     loss_id = F.cross_entropy(x_identic, f0_org_quantized)
             elif self.experiment == 'spsp2':
                 if self.model_type == 'G':
                     x_identic = self.model(x_f0_intrp_org, x_real_org_filt, emb_org)
                     loss_id = F.mse_loss(x_identic, x_real_org) 
                 else:
-                    x_identic = self.model(x_real_org_filt, f0_org_intrp)
-                    f0_org_quantized = quantize_f0_torch(f0_org)[1]
+                    x_identic = self.model(x_real_org_filt, f0_org_intrp).view(-1, self.config.dim_f0)
+                    f0_org_quantized = quantize_f0_torch(f0_org)[1].view(-1)
                     loss_id = F.cross_entropy(x_identic, f0_org_quantized)
             else:
                 raise ValueError
@@ -308,14 +308,16 @@ class Solver(object):
                         x_identic = self.model(x_f0, x_real_org, emb_org, rr=False)
                         loss_id = F.mse_loss(x_identic, x_real_org, reduction='sum')
                     else:
-                        x_identic = self.model(x_real_org, f0_org_one_hot, rr=False)
+                        x_identic = self.model(x_real_org, f0_org_one_hot, rr=False).view(-1, self.config.dim_f0)
+                        f0_org_quantized = f0_org_quantized.view(-1)
                         loss_id = F.cross_entropy(x_identic, f0_org_quantized, reduction='sum')
                 elif self.experiment == 'spsp2':
                     if self.model_type == 'G':
                         x_identic = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
                         loss_id = F.mse_loss(x_identic, x_real_org, reduction='sum')
                     else:
-                        x_identic = self.model(x_real_org_filt, f0_org_one_hot, rr=False)
+                        x_identic = self.model(x_real_org_filt, f0_org_one_hot, rr=False).view(-1, self.config.dim_f0)
+                        f0_org_quantized = f0_org_quantized.view(-1)
                         loss_id = F.cross_entropy(x_identic, f0_org_quantized, reduction='sum')
                 else:
                     raise ValueError
@@ -373,14 +375,16 @@ class Solver(object):
                         x_identic = self.model(x_f0, x_real_org, emb_org, rr=False)
                         loss_id = F.mse_loss(x_identic, x_real_org, reduction='sum')
                     else:
-                        x_identic = self.model(x_real_org, f0_org_one_hot, rr=False)
+                        x_identic = self.model(x_real_org, f0_org_one_hot, rr=False).view(-1, self.config.dim_f0)
+                        f0_org_quantized = f0_org_quantized.view(-1)
                         loss_id = F.cross_entropy(x_identic, f0_org_quantized, reduction='sum')
                 elif self.experiment == 'spsp2':
                     if self.model_type == 'G':
                         x_identic = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
                         loss_id = F.mse_loss(x_identic, x_real_org, reduction='sum')
                     else:
-                        x_identic = self.model(x_real_org_filt, f0_org_one_hot, rr=False)
+                        x_identic = self.model(x_real_org_filt, f0_org_one_hot, rr=False).view(-1, self.config.dim_f0)
+                        f0_org_quantized = f0_org_quantized.view(-1)
                         loss_id = F.cross_entropy(x_identic, f0_org_quantized, reduction='sum')
                 else:
                     raise ValueError
