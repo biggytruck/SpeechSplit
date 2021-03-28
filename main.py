@@ -47,28 +47,36 @@ def main(config):
                     'R_1_32': [8,1,8,8,32,32],
                     }
 
+        # G or F
+        model_types = [
+            'G',
+            'F'
+        ]
+
 
         for experiment in experiments:
             for model_name, hparams in settings.items():
+                for model_type in model_types:
                 
-                config.experiment = experiment
-                config.model_name = model_name
-                config.freq = hparams[0]
-                config.freq_2 = hparams[1]
-                config.freq_3 = hparams[2]
-                config.dim_neck = hparams[3]
-                config.dim_neck_2 = hparams[4]
-                config.dim_neck_3 = hparams[5] 
+                    config.experiment = experiment
+                    config.model_name = model_name
+                    config.freq = hparams[0]
+                    config.freq_2 = hparams[1]
+                    config.freq_3 = hparams[2]
+                    config.dim_neck = hparams[3]
+                    config.dim_neck_2 = hparams[4]
+                    config.dim_neck_3 = hparams[5] 
+                    config.model_type = model_type
 
-                # Solver for training
-                solver = Solver(data_loader_list, config)
+                    # Solver for training
+                    solver = Solver(data_loader_list, config)
 
-                if config.mode == 'train':
-                    solver.train()
-                elif config.mode == 'test':
-                    solver.test()
-                else:
-                    raise ValueError
+                    if config.mode == 'train':
+                        solver.train()
+                    elif config.mode == 'test':
+                        solver.test()
+                    else:
+                        raise ValueError
             
 if __name__ == '__main__':
     

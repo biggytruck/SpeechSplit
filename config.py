@@ -53,7 +53,7 @@ def get_config():
 
     # Training configuration.
     parser.add_argument('--num_iters', type=int, default=500000, help='number of total iterations')
-    parser.add_argument('--g_lr', type=float, default=0.0001, help='learning rate for G')
+    parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
     parser.add_argument('--beta1', type=float, default=0.9, help='beta1 for Adam optimizer')
     parser.add_argument('--beta2', type=float, default=0.999, help='beta2 for Adam optimizer')
     parser.add_argument('--resume_iters', type=int, default=None, help='resume training from this step')

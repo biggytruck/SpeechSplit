@@ -120,12 +120,13 @@ class Encoder_6(nn.Module):
         
         self.interp = InterpLnr(config)
 
-    def forward(self, x):
+    def forward(self, x, rr=True):
                 
         for conv in self.convolutions:
             x = F.relu(conv(x))
             x = x.transpose(1, 2)
-            x = self.interp(x, self.len_org.expand(x.size(0)))
+            if rr:
+                x = self.interp(x, self.len_org.expand(x.size(0)))
             x = x.transpose(1, 2)
         x = x.transpose(1, 2)    
         
@@ -350,14 +351,14 @@ class Generator_6(nn.Module):
         self.freq_3 = config.freq_3
 
 
-    def forward(self, x_org, f0_trg):
+    def forward(self, x_org, f0_trg, rr=True):
         
         x_2 = x_org.transpose(2,1)
         codes_2 = self.encoder_2(x_2, None)
         code_exp_2 = codes_2.repeat_interleave(self.freq_2, dim=1)
         
         x_3 = f0_trg.transpose(2,1)
-        codes_3 = self.encoder_3(x_3)
+        codes_3 = self.encoder_3(x_3, rr=rr)
         code_exp_3 = codes_3.repeat_interleave(self.freq_3, dim=1)
         
         encoder_outputs = torch.cat((code_exp_2, code_exp_3), dim=-1)
@@ -365,31 +366,8 @@ class Generator_6(nn.Module):
         mel_outputs = self.decoder(encoder_outputs)
         
         return mel_outputs
-
-
-
-class Discriminator(nn.Module):
-    """Discriminator
-    """
-    def __init__(self, config):
-        super().__init__()
-        
-        self.input_dim = config.dim_neck*2
-        self.output_dim = 257
-        self.detector = nn.LSTM(input_size=self.input_dim, 
-                                hidden_size=128, 
-                                batch_first=True, 
-                                dropout=0.2, 
-                                bidirectional=True)
-        self.score = nn.Linear(256, self.output_dim)
-
-    def forward(self, codes_x):
-        embs_x, (_, _) = self.detector(codes_x)
-        scores = self.score(embs_x)
-
-        return scores
     
-         
+  
     
 class InterpLnr(nn.Module):
     

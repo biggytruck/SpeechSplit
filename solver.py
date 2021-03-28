@@ -1,4 +1,5 @@
-from model import Generator_3 as Generator, Discriminator
+from model import Generator_3 as Generator
+from model import Generator_6 as F_Converter
 from model import InterpLnr
 import matplotlib.pyplot as plt
 import torch
@@ -10,7 +11,7 @@ import time
 import datetime
 import pickle
 import shutil
-
+from collections import OrderedDict
 from utils import pad_seq_to_2, quantize_f0_torch, quantize_f0_numpy
 
 # use demo data for simplicity
@@ -36,7 +37,7 @@ class Solver(object):
 
         # Training configurations.
         self.num_iters = self.config.num_iters
-        self.g_lr = self.config.g_lr
+        self.lr = self.config.lr
         self.beta1 = self.config.beta1
         self.beta2 = self.config.beta2
         self.resume_iters = self.config.resume_iters
@@ -78,15 +79,15 @@ class Solver(object):
 
             
     def build_model(self):        
-        self.G = Generator(self.config)
-        self.print_network(self.G, 'G')
+        self.model = Generator(self.config) if self.model_type == 'G' else F_Converter(self.config)
+        self.print_network(self.model, self.model_type)
         gpu_count = torch.cuda.device_count()
         if gpu_count > 1:
-            self.G = nn.DataParallel(self.G)
-        self.G.to(self.device)
+            self.model = nn.DataParallel(self.model)
+        self.model.to(self.device)
 
         self.Interp = InterpLnr(self.config)
-        self.g_optimizer = torch.optim.Adam(self.G.parameters(), self.g_lr, [self.beta1, self.beta2])
+        self.optimizer = torch.optim.Adam(self.model.parameters(), self.lr, [self.beta1, self.beta2])
         self.Interp.to(self.device)
 
         
@@ -108,21 +109,21 @@ class Solver(object):
     def restore_model(self, resume_iters):
         print('Loading the trained models from step {}...'.format(resume_iters))
         if resume_iters == -1:
-            G_path = os.path.join(self.best_model_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
-            g_checkpoint = torch.load(G_path, map_location=lambda storage, loc: storage)
+            ckpt_path = os.path.join(self.best_model_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
+            ckpt = torch.load(ckpt_path, map_location=lambda storage, loc: storage)
             try:
-                self.G.load_state_dict(g_checkpoint['model'])
+                self.model.load_state_dict(ckpt['model'])
             except RuntimeError:
-                self.G.module.load_state_dict(g_checkpoint['model'])
+                self.model.module.load_state_dict(ckpt['model'])
         else:
-            G_path = os.path.join(self.model_save_dir, '{}-{}-{}.ckpt'.format(self.model_name, self.model_type, resume_iters))
-            g_checkpoint = torch.load(G_path, map_location=lambda storage, loc: storage)
+            ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}.ckpt'.format(self.model_name, self.model_type, resume_iters))
+            ckpt = torch.load(ckpt_path, map_location=lambda storage, loc: storage)
             try:
-                self.G.load_state_dict(g_checkpoint['model'])
+                self.model.load_state_dict(ckpt['model'])
             except RuntimeError:
-                self.G.module.load_state_dict(g_checkpoint['model'])
-            self.g_optimizer.load_state_dict(g_checkpoint['optimizer'])
-            self.g_lr = self.g_optimizer.param_groups[0]['lr']
+                self.model.module.load_state_dict(ckpt['model'])
+            self.optimizer.load_state_dict(ckpt['optimizer'])
+            self.lr = self.optimizer.param_groups[0]['lr']
         
         
     def build_tensorboard(self):
@@ -141,18 +142,17 @@ class Solver(object):
             start_iters = self.resume_iters
             self.num_iters += self.resume_iters
             self.restore_model(self.resume_iters)
-            self.print_optimizer(self.g_optimizer, 'G_optimizer')
+            self.print_optimizer(self.optimizer, 'optimizer')
                         
         # Learning rate cache for decaying.
-        g_lr = self.g_lr
-        print ('Current learning rates, g_lr: {}.'.format(g_lr))
+        lr = self.lr
+        print ('Current learning rates, lr: {}.'.format(lr))
             
         # Start training.
         print('Start training...')
         print(len(self.train_loader))
         start_time = time.time()
-        adv_loss = nn.CrossEntropyLoss()
-        self.G = self.G.train()
+        self.model = self.model.train()
         for i in range(start_iters, self.num_iters):
 
             # =================================================================================== #
@@ -185,21 +185,32 @@ class Solver(object):
             x_f0_intrp_org = torch.cat((x_f0_intrp[:,:,:-1], f0_org_intrp), dim=-1) # [B, T, F+257]
             
             if self.experiment == 'spsp1':
-                x_identic = self.G(x_f0_intrp_org, x_real_org, emb_org)
+                if self.model_type == 'G':
+                    x_identic = self.model(x_f0_intrp_org, x_real_org, emb_org)
+                    loss_id = F.mse_loss(x_identic, x_real_org) 
+                else:
+                    x_identic = self.model(x_real_org, f0_org_intrp)
+                    f0_org_quantized = quantize_f0_torch(f0_org)[1]
+                    loss_id = F.cross_entropy(x_identic, f0_org_quantized)
             elif self.experiment == 'spsp2':
-                x_identic = self.G(x_f0_intrp_org, x_real_org_filt, emb_org)
+                if self.model_type == 'G':
+                    x_identic = self.model(x_f0_intrp_org, x_real_org_filt, emb_org)
+                    loss_id = F.mse_loss(x_identic, x_real_org) 
+                else:
+                    x_identic = self.model(x_real_org_filt, f0_org_intrp)
+                    f0_org_quantized = quantize_f0_torch(f0_org)[1]
+                    loss_id = F.cross_entropy(x_identic, f0_org_quantized)
             else:
                 raise ValueError
-            g_loss_id = F.mse_loss(x_real_org, x_identic) 
            
             # Backward and optimize.
-            g_loss = g_loss_id
-            self.g_optimizer.zero_grad()
-            g_loss.backward()
-            self.g_optimizer.step()
+            loss = loss_id
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
 
             # Logging.
-            train_g_loss_id = g_loss_id.item()
+            train_loss_id = loss_id.item()
 
             # =================================================================================== #
             #                           3. Logging and saveing checkpoints                        #
@@ -210,42 +221,40 @@ class Solver(object):
                 et = time.time() - start_time
                 et = str(datetime.timedelta(seconds=et))[:-7]
                 log = "Elapsed [{}], Iteration [{}/{}]".format(et, i+1, self.num_iters)
-                log += ", G/train_loss_id: {:.8f}".format(train_g_loss_id)
+                log += ", {}/train_loss_id: {:.8f}".format(self.model_type, train_loss_id)
                 print(log)
                 if self.use_tensorboard:
-                    self.writer.add_scalar('G/train_loss_id', train_g_loss_id, i+1)
+                    self.writer.add_scalar(f'{self.model_type}/train_loss_id', train_loss_id, i+1)
 
             # Plot spectrograms for training and validation data
-            if (i+1) % self.sample_step == 0:
+            if (i+1) % self.sample_step == 0 and self.model_type == 'G':
                 self.plot('train', i)
                 self.plot('val', i)
                         
             # Save model checkpoints and the best one if possible
             if (i+1) % self.model_save_step == 0:
-                G_path = os.path.join(self.model_save_dir, '{}-{}-{}.ckpt'.format(self.model_name, self.model_type, i+1))
-                torch.save({'model': self.G.state_dict(),
-                            'optimizer': self.g_optimizer.state_dict()}, G_path)
+                ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}.ckpt'.format(self.model_name, self.model_type, i+1))
+                torch.save({'model': self.model.state_dict(),
+                            'optimizer': self.optimizer.state_dict()}, ckpt_path)
 
                 print('Saved model checkpoints into {}...'.format(self.model_save_dir))
 
                 # save the best checkpoint so far if validation loss decreases
                 val_loss = self.validate()
-                print("Iteration {}, G/val_g_loss_id: {}".format(i+1, val_loss))
+                print("Iteration {}, {}/val_loss_id: {}".format(i+1, self.model_type, val_loss))
 
                 if self.use_tensorboard:
-                    self.writer.add_scalar('G/val_g_loss_id', val_loss, i+1)
+                    self.writer.add_scalar(f'{self.model_type}/val_loss_id', val_loss, i+1)
                 
                 if val_loss < self.min_val_loss[1]:
                     self.min_val_loss = (i+1, val_loss)
-                    G_path = os.path.join(self.model_save_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
-                    torch.save({'model': self.G.state_dict()}, G_path)
+                    ckpt_path = os.path.join(self.model_save_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
+                    torch.save({'model': self.model.state_dict()}, ckpt_path)
                     print('Best checkpoint so far: Iteration {}, Validation loss: {}'.format(self.min_val_loss[0], 
                                                                                              self.min_val_loss[1]))
-                # else:
-                #     break
 
-        G_path = os.path.join(self.model_save_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
-        shutil.copy2(G_path, self.best_model_dir)
+        ckpt_path = os.path.join(self.model_save_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
+        shutil.copy2(ckpt_path, self.best_model_dir)
         print('Best checkpoint for model {}: Iteration {}, Validation loss: {}'.format(self.model_name,
                                                                                        self.min_val_loss[0], 
                                                                                        self.min_val_loss[1]))
@@ -259,13 +268,13 @@ class Solver(object):
         if self.resume_iters:
             print('Resuming ...')
             self.restore_model(self.resume_iters)
-            self.print_optimizer(self.g_optimizer, 'G_optimizer')
+            self.print_optimizer(self.optimizer, 'optimizer')
 
         # Test the model
-        self.G = self.G.eval()
+        self.model = self.model.eval()
         print(len(self.test_loader))
         with torch.no_grad():
-            test_g_loss_id = 0
+            test_loss_id = 0
             sample_cnt = 0
             while True:
 
@@ -291,25 +300,34 @@ class Solver(object):
                 # =================================================================================== #
                             
                 # Identity mapping loss
-                f0_org_quantized = quantize_f0_torch(f0_org)[0] # [B, T, 256]
-                x_f0 = torch.cat((x_real_org, f0_org_quantized), dim=-1) # [B, T, F+256]
+                f0_org_one_hot, f0_org_quantized = quantize_f0_torch(f0_org) # [B, T, 257], [B, T, 1]
+                x_f0 = torch.cat((x_real_org, f0_org_one_hot), dim=-1) # [B, T, F+257]
             
                 if self.experiment == 'spsp1':
-                    x_identic = self.G(x_f0, x_real_org, emb_org, rr=False)
+                    if self.model_type == 'G':
+                        x_identic = self.model(x_f0, x_real_org, emb_org, rr=False)
+                        loss_id = F.mse_loss(x_identic, x_real_org, reduction='sum')
+                    else:
+                        x_identic = self.model(x_real_org, f0_org_one_hot, rr=False)
+                        loss_id = F.cross_entropy(x_identic, f0_org_quantized, reduction='sum')
                 elif self.experiment == 'spsp2':
-                    x_identic = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
+                    if self.model_type == 'G':
+                        x_identic = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
+                        loss_id = F.mse_loss(x_identic, x_real_org, reduction='sum')
+                    else:
+                        x_identic = self.model(x_real_org_filt, f0_org_one_hot, rr=False)
+                        loss_id = F.cross_entropy(x_identic, f0_org_quantized, reduction='sum')
                 else:
                     raise ValueError
-                g_loss_id = F.mse_loss(x_real_org, x_identic, reduction='sum')
             
                 # log testing loss.
-                test_g_loss_id += g_loss_id.item()
+                test_loss_id += loss_id.item()
                 sample_cnt += batch_size
             
-            test_g_loss_id /= sample_cnt
-            print("Iteration {}, G/test_g_loss_id: {}".format(self.resume_iters, test_g_loss_id))
+            test_loss_id /= sample_cnt
+            print("Iteration {}, {}/test_loss_id: {}".format(self.resume_iters, self.model_type, test_loss_id))
             if self.use_tensorboard:
-                self.writer.add_scalar('G/test_g_loss_id', test_g_loss_id, self.resume_iters)
+                self.writer.add_scalar(f'{self.model_type}/test_loss_id', test_loss_id, self.resume_iters)
 
         self.plot('test', self.resume_iters-1)
 
@@ -318,10 +336,10 @@ class Solver(object):
         data_iter = iter(self.val_loader)
 
         # Evaluate the model
-        self.G = self.G.eval()
+        self.model = self.model.eval()
         print(len(self.val_loader))
         with torch.no_grad():
-            val_g_loss_id = 0
+            val_loss_id = 0
             sample_cnt = 0
             while True:
 
@@ -347,27 +365,36 @@ class Solver(object):
                 # =================================================================================== #
                             
                 # Identity mapping loss
-                f0_org_quantized = quantize_f0_torch(f0_org)[0] # [B, T, 256]
-                x_f0 = torch.cat((x_real_org, f0_org_quantized), dim=-1) # [B, T, F+256]
+                f0_org_one_hot, f0_org_quantized = quantize_f0_torch(f0_org) # [B, T, 257], [B, T, 1]
+                x_f0 = torch.cat((x_real_org, f0_org_one_hot), dim=-1) # [B, T, F+257]
             
                 if self.experiment == 'spsp1':
-                    x_identic = self.G(x_f0, x_real_org, emb_org, rr=False)
+                    if self.model_type == 'G':
+                        x_identic = self.model(x_f0, x_real_org, emb_org, rr=False)
+                        loss_id = F.mse_loss(x_identic, x_real_org, reduction='sum')
+                    else:
+                        x_identic = self.model(x_real_org, f0_org_one_hot, rr=False)
+                        loss_id = F.cross_entropy(x_identic, f0_org_quantized, reduction='sum')
                 elif self.experiment == 'spsp2':
-                    x_identic = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
+                    if self.model_type == 'G':
+                        x_identic = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
+                        loss_id = F.mse_loss(x_identic, x_real_org, reduction='sum')
+                    else:
+                        x_identic = self.model(x_real_org_filt, f0_org_one_hot, rr=False)
+                        loss_id = F.cross_entropy(x_identic, f0_org_quantized, reduction='sum')
                 else:
                     raise ValueError
-                g_loss_id = F.mse_loss(x_real_org, x_identic, reduction='sum')
             
                 # log validation loss.
-                val_g_loss_id += g_loss_id.item()
+                val_loss_id += loss_id.item()
                 sample_cnt += batch_size
             
-            val_g_loss_id /= sample_cnt
+            val_loss_id /= sample_cnt
 
         # return to training mode
-        self.G = self.G.train()
+        self.model = self.model.train()
 
-        return val_g_loss_id
+        return val_loss_id
 
     
     def plot(self, mode, i):
@@ -383,7 +410,7 @@ class Solver(object):
 
         # plot samples
 
-        self.G = self.G.eval()
+        self.model = self.model.eval()
         
         with torch.no_grad():
             while True:
@@ -411,23 +438,23 @@ class Solver(object):
                 # =================================================================================== #
                             
                 # Identity mapping loss
-                f0_org_quantized = quantize_f0_torch(f0_org)[0] # [B, T, 256]
-                x_f0 = torch.cat((x_real_org, f0_org_quantized), dim=-1) # [B, T, F+256]
-                x_f0_woF = torch.cat((x_real_org, torch.zeros_like(f0_org_quantized)), dim=-1) # [B, T, F+256]
-                x_f0_woC = torch.cat((torch.zeros_like(x_real_org), f0_org_quantized), dim=-1) # [B, T, F+256]
+                f0_org_one_hot = quantize_f0_torch(f0_org)[0] # [B, T, 257]
+                x_f0 = torch.cat((x_real_org, f0_org_one_hot), dim=-1) # [B, T, F+257]
+                x_f0_woF = torch.cat((x_real_org, torch.zeros_like(f0_org_one_hot)), dim=-1) # [B, T, F+257]
+                x_f0_woC = torch.cat((torch.zeros_like(x_real_org), f0_org_one_hot), dim=-1) # [B, T, F+257]
 
                 if self.experiment == 'spsp1':
-                    x_identic = self.G(x_f0, x_real_org, emb_org, rr=False)
-                    x_identic_woF = self.G(x_f0_woF, x_real_org, emb_org, rr=False)
-                    x_identic_woR = self.G(x_f0, torch.zeros_like(x_real_org), emb_org, rr=False)
-                    x_identic_woC = self.G(x_f0_woC, x_real_org, emb_org, rr=False)
-                    x_identic_woT = self.G(x_f0, x_real_org, torch.zeros_like(emb_org), rr=False)
+                    x_identic = self.model(x_f0, x_real_org, emb_org, rr=False)
+                    x_identic_woF = self.model(x_f0_woF, x_real_org, emb_org, rr=False)
+                    x_identic_woR = self.model(x_f0, torch.zeros_like(x_real_org), emb_org, rr=False)
+                    x_identic_woC = self.model(x_f0_woC, x_real_org, emb_org, rr=False)
+                    x_identic_woT = self.model(x_f0, x_real_org, torch.zeros_like(emb_org), rr=False)
                 elif self.experiment == 'spsp2':
-                    x_identic = self.G(x_f0, x_real_org_filt, emb_org, rr=False)
-                    x_identic_woF = self.G(x_f0_woF, x_real_org_filt, emb_org, rr=False)
-                    x_identic_woR = self.G(x_f0, torch.zeros_like(x_real_org_filt), emb_org, rr=False)
-                    x_identic_woC = self.G(x_f0_woC, x_real_org_filt, emb_org, rr=False)
-                    x_identic_woT = self.G(x_f0, x_real_org_filt, torch.zeros_like(emb_org), rr=False)
+                    x_identic = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
+                    x_identic_woF = self.model(x_f0_woF, x_real_org_filt, emb_org, rr=False)
+                    x_identic_woR = self.model(x_f0, torch.zeros_like(x_real_org_filt), emb_org, rr=False)
+                    x_identic_woC = self.model(x_f0_woC, x_real_org_filt, emb_org, rr=False)
+                    x_identic_woT = self.model(x_f0, x_real_org_filt, torch.zeros_like(emb_org), rr=False)
                 else:
                     raise ValueError
 
@@ -449,13 +476,13 @@ class Solver(object):
                 ax4.set_title('Output Mel-Spectrogram Without Rhythm', fontsize=10)
                 ax5.set_title('Output Mel-Spectrogram Without Pitch', fontsize=10)
                 ax6.set_title('Output Mel-Spectrogram Without Timbre', fontsize=10)
-                im1 = ax1.imshow(melsp_gd_pad, aspect='auto', vmin=min_value, vmax=max_value)
-                im2 = ax2.imshow(melsp_out, aspect='auto', vmin=min_value, vmax=max_value)
-                im3 = ax3.imshow(melsp_woC, aspect='auto', vmin=min_value, vmax=max_value)
-                im4 = ax4.imshow(melsp_woR, aspect='auto', vmin=min_value, vmax=max_value)
-                im5 = ax5.imshow(melsp_woF, aspect='auto', vmin=min_value, vmax=max_value)
-                im6 = ax6.imshow(melsp_woT, aspect='auto', vmin=min_value, vmax=max_value)
+                _ = ax1.imshow(melsp_gd_pad, aspect='auto', vmin=min_value, vmax=max_value)
+                _ = ax2.imshow(melsp_out, aspect='auto', vmin=min_value, vmax=max_value)
+                _ = ax3.imshow(melsp_woC, aspect='auto', vmin=min_value, vmax=max_value)
+                _ = ax4.imshow(melsp_woR, aspect='auto', vmin=min_value, vmax=max_value)
+                _ = ax5.imshow(melsp_woF, aspect='auto', vmin=min_value, vmax=max_value)
+                _ = ax6.imshow(melsp_woT, aspect='auto', vmin=min_value, vmax=max_value)
                 plt.savefig(f'{self.sample_dir}/{self.model_name}_{mode}_output_{spk_id_org[0]}_{i+1}.png', dpi=150)
                 plt.close(fig)
 
-        self.G = self.G.train()
+        self.model = self.model.train()
