@@ -308,23 +308,26 @@ def get_test_data_set(turk_list_fname = 'turk_list.txt', spk_list_fname = 'spk_l
     with open(turk_list_fname, 'r') as f:
         for line in f:
             line_list = line.strip().split('_')
-            if line_list[0] in ['F', 'R', 'U']:
+            if line_list[0] in ['F', 'R', 'U', 'C']:
                 test_data_by_ctype[line_list[0]] = []
                 curr_key = line_list[0]
-            elif len(line_list) == 4:
+            elif len(line_list) >= 4:
                 src_dir = line_list[0]
                 tgt_dir = line_list[1]
-                wav_id = line_list[2]
-                src_name = '_'.join([src_dir, wav_id])
-                tgt_name = '_'.join([tgt_dir, wav_id])
+                if len(line_list) == 4:
+                    src_wav_id, tgt_wav_id = line_list[2], line_list[2]
+                elif len(line_list) == 5:
+                    src_wav_id, tgt_wav_id = line_list[2], line_list[3]
+                src_name = '_'.join([src_dir, src_wav_id])
+                tgt_name = '_'.join([tgt_dir, tgt_wav_id])
                 item = ((src_dir+'/'+src_name, spk2id[src_dir]), \
                         (tgt_dir+'/'+tgt_name, spk2id[tgt_dir]))
                 if not test_data_by_ctype[curr_key] or item != test_data_by_ctype[curr_key][-1]:
                     test_data_by_ctype[curr_key].append(item)
-                src_path1 = src_dir+'/'+'_'.join([src_dir, wav_id[:3], 'mic1.npy'])
-                src_path2 = src_dir+'/'+'_'.join([src_dir, wav_id[:3], 'mic2.npy'])
-                tgt_path1 = tgt_dir+'/'+'_'.join([tgt_dir, wav_id[:3], 'mic1.npy'])
-                tgt_path2 = tgt_dir+'/'+'_'.join([tgt_dir, wav_id[:3], 'mic2.npy'])
+                src_path1 = src_dir+'/'+'_'.join([src_dir, src_wav_id[:3], 'mic1.npy'])
+                src_path2 = src_dir+'/'+'_'.join([src_dir, src_wav_id[:3], 'mic2.npy'])
+                tgt_path1 = tgt_dir+'/'+'_'.join([tgt_dir, tgt_wav_id[:3], 'mic1.npy'])
+                tgt_path2 = tgt_dir+'/'+'_'.join([tgt_dir, tgt_wav_id[:3], 'mic2.npy'])
                 for path in [src_path1, tgt_path1, src_path2, tgt_path2]:
                     test_data.add(path)
 

@@ -15,17 +15,6 @@ from config import get_config
 from collections import OrderedDict
 import matplotlib.pyplot as plt
 
-use_cuda = torch.cuda.is_available()
-device = torch.device("cuda" if use_cuda else "cpu")
-config = get_config()
-wav_dir = 'eval/assets/wavs/'
-spmel_dir = 'eval/assets/spmel/'
-spmel_filt_dir = 'eval/assets/spmel_filt/'
-raptf0_dir = 'eval/assets/raptf0/'
-model_dir = 'eval/models/'
-result_dir = 'eval/results'
-plot_dir = 'eval/plots'
-test_data_by_ctype = pickle.load(open('eval/assets/test_data_by_ctype.pkl', 'rb'))
 
 def load_spmel(fname):
     spmel = np.load(os.path.join(spmel_dir, fname))
@@ -61,7 +50,17 @@ def get_spk_emb(spk_id):
 
     return spk_emb
 
-def convert(model, ctype, src_path, tgt_path, src_id, tgt_id):
+def convert_pitch(model, rhythm_input, pitch_input):
+    max_len = max(rhythm_input.shape[1], pitch_input.shape[1])
+    rhythm_input = np.pad(rhythm_input, ((0,0), (0,max_len-rhythm_input.shape[1]), (0,0)), 'constant')
+    pitch_input = np.pad(pitch_input, ((0,0), (0,max_len-pitch_input.shape[1]), (0,0)), 'constant')
+    rhythm_input = torch.from_numpy(rhythm_input).float().to(device)
+    pitch_input = torch.from_numpy(pitch_input).float().to(device)
+    pitch_output = model(rhythm_input, pitch_input, rr=False)
+
+    return pitch_output.cpu().numpy()
+
+def convert(G, F, model_type, ctype, src_path, tgt_path, src_id, tgt_id):
     if ctype == 'R':
         spmel = load_spmel(src_path)
         spmel_filt = load_spmel_filt(tgt_path)
@@ -70,12 +69,20 @@ def convert(model, ctype, src_path, tgt_path, src_id, tgt_id):
     elif ctype == 'C':
         spmel = load_spmel(tgt_path)
         spmel_filt = load_spmel_filt(src_path)
-        raptf0 = load_raptf0(tgt_path)
+        raptf0 = load_raptf0(src_path)
+        if model_type == 'spsp1':
+            raptf0 = convert_pitch(F, spmel, raptf0)
+        else:
+            raptf0 = convert_pitch(F, spmel_filt, raptf0)
         spk_emb = get_spk_emb(src_id)
     elif ctype == 'F':
         spmel = load_spmel(src_path)
         spmel_filt = load_spmel_filt(src_path)
         raptf0 = load_raptf0(tgt_path)
+        if model_type == 'spsp1':
+            raptf0 = convert_pitch(F, spmel, raptf0)
+        else:
+            raptf0 = convert_pitch(F, spmel_filt, raptf0)
         spk_emb = get_spk_emb(src_id)
     elif ctype == 'U':
         spmel = load_spmel(src_path)
@@ -98,9 +105,12 @@ def convert(model, ctype, src_path, tgt_path, src_id, tgt_id):
     raptf0 = torch.from_numpy(raptf0).to(device)
     spmel_f0 = torch.cat((spmel, raptf0), dim=-1)
     
-    rhythm = model.rhythm(spmel_filt)
-    content, pitch = model.content_pitch(spmel_f0, rr=False)
-    spmel_output = model.decode(content, rhythm, pitch, spk_emb, T).cpu().numpy()[0]
+    if model_type == 'spsp1':
+        rhythm = G.rhythm(spmel)
+    else:
+        rhythm = G.rhythm(spmel_filt)
+    content, pitch = G.content_pitch(spmel_f0, rr=False)
+    spmel_output = G.decode(content, rhythm, pitch, spk_emb, T).cpu().numpy()[0]
 
     return spmel_output
 
@@ -184,24 +194,36 @@ class Synthesizer(object):
 
 
 if __name__ == '__main__':
-    
+    use_cuda = torch.cuda.is_available()
+    device = torch.device("cuda" if use_cuda else "cpu")
+    config = get_config()
+    wav_dir = 'eval/assets/wavs/'
+    spmel_dir = 'eval/assets/spmel/'
+    spmel_filt_dir = 'eval/assets/spmel_filt/'
+    raptf0_dir = 'eval/assets/raptf0/'
+    model_dir = 'eval/models/'
+    result_dir = 'eval/results'
+    plot_dir = 'eval/plots'
+    test_data_by_ctype = pickle.load(open('eval/assets/test_data_by_ctype.pkl', 'rb'))
     fs = 16000
     s = Synthesizer()
     ckpt = torch.load('./run/models/wavenet_vocoder.pth')
     s.load_ckpt(ckpt)
     model_type_list = [
-        # 'spsp1',
-        'spsp2',
+        'spsp1',
+        # 'spsp2',
     ]
     settings = {
-                # 'R_8_1': [8,8,8,8,1,32],
-                # 'R_1_1': [8,1,8,8,1,32],
-                # 'R_8_32': [8,8,8,8,32,32],
+                'R_8_1': [8,8,8,8,1,32],
+                'R_1_1': [8,1,8,8,1,32],
+                'R_8_32': [8,8,8,8,32,32],
                 'R_1_32': [8,1,8,8,32,32],
+                # 'wide_CR_8_8': [8,1,8,8,32,32],
                 }
 
     ctype_list = [
-        # 'F',
+        'F',
+        # 'C',
         'R',
         'U',
     ]
@@ -220,7 +242,6 @@ if __name__ == '__main__':
             
                 G = Generator(config).eval().to(device)
                 ckpt = torch.load(os.path.join(model_dir, model_type, model_name+'-G-'+'best.ckpt'))
-                
                 try:
                     G.load_state_dict(ckpt['model'])
                 except:
@@ -228,6 +249,16 @@ if __name__ == '__main__':
                     for k, v in ckpt['model'].items():
                         new_state_dict[k[7:]] = v
                     G.load_state_dict(new_state_dict)
+
+                F = F0_Converter(config).eval().to(device)
+                ckpt = torch.load(os.path.join(model_dir, model_type, model_name+'-F-'+'best.ckpt'))
+                try:
+                    F.load_state_dict(ckpt['model'])
+                except:
+                    new_state_dict = OrderedDict()
+                    for k, v in ckpt['model'].items():
+                        new_state_dict[k[7:]] = v
+                    F.load_state_dict(new_state_dict)
 
                 for ctype in ctype_list:
                     pairs = test_data_by_ctype[ctype]
@@ -244,32 +275,10 @@ if __name__ == '__main__':
                         tgt_save_path = os.path.join(result_dir, model_type, model_name, ctype, fname+'_t.wav')
                         write(tgt_save_path, tgt_wav, fs)
 
-                        cvt_spmel = convert(G, ctype, src_name+'.npy', tgt_name+'.npy', src_id, tgt_id)
+                        cvt_spmel = convert(G, F, model_type, ctype, src_name+'.npy', tgt_name+'.npy', src_id, tgt_id)
                         cvt_wav = s.spect2wav(c=cvt_spmel)
                         cvt_save_path = os.path.join(result_dir, model_type, model_name, ctype, fname+'_c.wav')
                         write(cvt_save_path, cvt_wav, fs)
 
                         plot_path = os.path.join(plot_dir, model_type, model_name, ctype, fname+'.png')
                         draw_plot(src_spmel, tgt_spmel, cvt_spmel, plot_path)
-                        # break
-
-                # src_spmel = np.load(os.path.join(spmel_dir, 'p225/p225_003001.npy'))
-                # src_save_path = os.path.join(result_dir, 'spsp2', 'C', 'p225_003001_p225_003002_s.wav')
-                # src_wav, _ = read('/home/biggytruck/Github/vc_workspace/SpeechSplit/eval/assets/wavs/p225/p225_003001.wav')
-                # write(src_save_path, src_wav, fs)
-                
-                # tgt_spmel = np.load(os.path.join(spmel_dir, 'p225/p225_003002.npy'))
-                # tgt_save_path = os.path.join(result_dir, 'spsp2', 'C', 'p225_003001_p225_003002_t.wav')
-                # tgt_wav, _ = read('/home/biggytruck/Github/vc_workspace/SpeechSplit/eval/assets/wavs/p225/p225_003002.wav')
-                # write(tgt_save_path, tgt_wav, fs)
-
-                # cvt_spmel = convert(G, 'C', 'p225/p225_003001.npy', 'p225/p225_003002.npy', 0, 0)
-                # cvt_wav = s.spect2wav(c=cvt_spmel)
-                # cvt_save_path = os.path.join(result_dir, 'spsp2', 'C', 'p225_003001_p225_003002_c.wav')
-                # write(cvt_save_path, cvt_wav, fs)
-
-                # plot_path = os.path.join(plot_dir, 'spsp2', 'C', 'p225_003001_p225_003002.png')
-                # draw_plot(src_spmel, tgt_spmel, cvt_spmel, plot_path)
-
-                
-

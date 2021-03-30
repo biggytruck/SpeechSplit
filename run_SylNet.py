@@ -157,6 +157,6 @@ def get_speaking_rate(fname_dir):
         duration = len(sound)    
         trimmed_sound = sound[start_trim:duration-end_trim]
         trimmed_duration_in_sec = len(trimmed_sound)/1000
-        result_dict[basename] = y/trimmed_duration_in_sec
+        result_dict[basename] = (y, trimmed_duration_in_sec)
 
     return result_dict

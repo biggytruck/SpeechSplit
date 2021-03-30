@@ -32,18 +32,30 @@ for key, val in c_checkpoint['model_b'].items():
     new_state_dict[new_key] = val
 C.load_state_dict(new_state_dict)
 prng = RandomState(1)
+txt_dict = {
+    '001': 'Please call Stella',
+    '010': 'People look, but no one ever finds it',
+    '003001': 'Six spoons of fresh snow peas',
+    '003002': 'five thick slabs of blue cheese',
+    '005002': 'and we will go meet her Wednesday',
+    '006001': 'When the sunlight strikes raindrops in the air',
+    '008001': 'These take the shape of a long round arch',
+    '024001': 'This is a very common type of bow',
+    '024002': 'one showing mainly red and yellow',
+    '024003': 'with little or no green or blue'
+}
 
 class Evaluator(object):
 
     def __init__(self):
 
         """Initialize GCP speech recognizer"""
-        # self.sr_client = speech.SpeechClient()
-        # self.sr_config = speech.RecognitionConfig(
-        #                     encoding=speech.RecognitionConfig.AudioEncoding.FLAC,
-        #                     sample_rate_hertz=16000,
-        #                     language_code="en-US",
-        #                 )
+        self.sr_client = speech.SpeechClient()
+        self.sr_config = speech.RecognitionConfig(
+                            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
+                            sample_rate_hertz=16000,
+                            language_code="en-US",
+                        )
         self.wer_transform = jiwer.Compose([
                                 jiwer.ToLowerCase(),
                                 jiwer.RemoveMultipleSpaces(),
@@ -53,23 +65,23 @@ class Evaluator(object):
                             ]) 
 
 
-    # def get_asr_result(self, content):
-    #     """
-    #     Note that transcription is limited to a 60 seconds audio file.
-    #     Use a GCS file for audio longer than 1 minute.
-    #     """
-    #     audio = speech.RecognitionAudio(content=content)
-    #     operation = self.sr_client.long_running_recognize(config=self.sr_config, audio=audio)
-    #     response = operation.result(timeout=90)
-    #     text = []
+    def get_asr_result(self, content):
+        """
+        Note that transcription is limited to a 60 seconds audio file.
+        Use a GCS file for audio longer than 1 minute.
+        """
+        audio = speech.RecognitionAudio(content=content)
+        operation = self.sr_client.long_running_recognize(config=self.sr_config, audio=audio)
+        response = operation.result(timeout=90)
+        text = []
 
-    #     # Each result is for a consecutive portion of the audio. Iterate through
-    #     # them to get the transcripts for the entire audio file.
-    #     for result in response.results:
-    #         # The first alternative is the most likely one for this portion.
-    #         text.append(result.alternatives[0].transcript)
+        # Each result is for a consecutive portion of the audio. Iterate through
+        # them to get the transcripts for the entire audio file.
+        for result in response.results:
+            # The first alternative is the most likely one for this portion.
+            text.append(result.alternatives[0].transcript)
 
-    #     return " ".join(text)
+        return " ".join(text)
 
 
     def get_wer(self, txt, pred_txt):
@@ -79,7 +91,7 @@ class Evaluator(object):
 
     def get_vde(self, f0s, pred_f0s):
         Nerr = 0
-        for f0, pred_f0 in zip(f0, pred_f0s):
+        for f0, pred_f0 in zip(f0s, pred_f0s):
             if f0 > 1e-6 and pred_f0 <= 1e-6:
                 Nerr += 1
             elif f0 <= 1e-6 and pred_f0 > 1e-6:
@@ -120,13 +132,18 @@ class Evaluator(object):
 
         return content
 
-    def evaluate_rhythm(self, fname_dir):
+    def evaluate_rhythm(self, fname_dir, fname_list):
         speaking_rate = get_speaking_rate(fname_dir) # key: file name; value: speaking rate(num_syls / voiced_duration)
-        fname_list = set([key[:-6] for key in speaking_rate.keys()])
         src_cnt, tgt_cnt = 0, 0
-        for fname in sorted(fname_list):
-            src, tgt, cvt = speaking_rate[fname+'_s.wav'], speaking_rate[fname+'_t.wav'], speaking_rate[fname+'_c.wav']
-            if abs(tgt-cvt)<=abs(src-cvt):
+        for fname in fname_list:
+            (src_rate, src_dur) = speaking_rate[fname+'_s.wav']
+            (tgt_rate, tgt_dur) = speaking_rate[fname+'_t.wav']
+            (cvt_rate, cvt_dur) = speaking_rate[fname+'_c.wav']
+            avg_rate = (src_rate+tgt_rate) / 2
+            src = avg_rate / src_dur
+            tgt = avg_rate / tgt_dur
+            cvt = cvt_rate / cvt_dur
+            if abs(tgt-cvt)<abs(src-cvt):
                 tgt_cnt += 1
             else:
                 src_cnt += 1
@@ -135,24 +152,36 @@ class Evaluator(object):
                 'tgt_cnt': tgt_cnt}
 
 
-    # def evaluate_content(self, cvt_wav_dir, src_txt_dir, tgt_txt_dir):
-    #     src_wer, tgt_wer = 0, 0
-    #     for fname in os.listdir(cvt_wav_dir):
-    #         cvt_name = os.path.join(cvt_wav_dir, fname)
-    #         cvt_content = self._get_content_from_file(cvt_name)
-    #         cvt_txt = self.get_asr_result(cvt_content)
+    def evaluate_content(self, fname_dir, fname_list):
 
-    #         with open(os.path.join(src_txt_dir, os.path.splitext(fname)[0]+'.txt'), 'r') as f:
-    #             src_txt = f.read().strip()
-    #         src_wer += self.get_wer(src_txt, cvt_txt)
+        src_wer = 0
+        cvt_wer = 0
 
-    #         with open(os.path.join(tgt_txt_dir, os.path.splitext(fname)[0]+'.txt'), 'r') as f:
-    #             tgt_txt = f.read().strip()
-    #         tgt_wer += self.get_wer(tgt_txt, cvt_txt)
-    #     src_wer /= len(os.listdir(cvt_wav_dir))
-    #     tgt_wer /= len(os.listdir(cvt_wav_dir))
+        for fname in fname_list:
 
-    #     return src_wer, tgt_wer
+            src_name = os.path.join(fname_dir, fname+'_s.wav')
+            src_content = self._get_content_from_file(src_name)
+            src_txt = self.get_asr_result(src_content)
+
+            cvt_name = os.path.join(fname_dir, fname+'_c.wav')
+            cvt_content = self._get_content_from_file(cvt_name)
+            cvt_txt = self.get_asr_result(cvt_content)
+
+            tgt_wav_id = fname.split('_')[3]
+            tgt_txt = txt_dict[tgt_wav_id]
+
+            print("source text: %s, target text: %s, converted text: %s"%(src_txt, tgt_txt, cvt_txt))
+
+            src_wer += self.get_wer(tgt_txt, src_txt)
+            cvt_wer += self.get_wer(tgt_txt, cvt_txt)
+
+        src_wer /= len(fname_list)
+        cvt_wer /= len(fname_list)
+        rel_wer = (cvt_wer - src_wer) / src_wer
+
+        return {'src_wer': src_wer, \
+                'cvt_wer': cvt_wer, \
+                'rel_wer': rel_wer}
 
     def evaluate_pitch(self, fname_dir, fname_list):
 
@@ -264,19 +293,21 @@ if __name__ == '__main__':
     e = Evaluator()
     test_data_by_ctype = pickle.load(open('eval/assets/test_data_by_ctype.pkl', 'rb'))
     model_type_list = [
-        # 'spsp1',
+        'spsp1',
         'spsp2',
     ]
 
     model_name_list = {
-        # 'R_8_1',
-        # 'R_1_1',
-        # 'R_8_32',
+        'R_8_1',
+        'R_1_1',
+        'R_8_32',
         'R_1_32',
+        # 'wide_CR_8_8',
     }
 
     ctype_list = [
-        # 'F',
+        'F',
+        # 'C',
         'R',
         'U',
     ]
@@ -300,11 +331,12 @@ if __name__ == '__main__':
                     fname_list.append(src_name.split('/')[-1]+'_'+tgt_name.split('/')[-1])
                 fname_dir = os.path.join(result_dir, model_type, model_name, ctype)
 
-                if ctype == 'F':
-                    metrics[model_type][model_name][ctype] = e.evaluate_pitch(fname_dir, fname_list)
-                elif ctype == 'R':
-                    metrics[model_type][model_name][ctype] = e.evaluate_rhythm(fname_dir)
-                elif ctype == 'U':
-                    metrics[model_type][model_name][ctype] = e.evaluate_timbre(fname_dir, fname_list)
+                if ctype in ['F', 'R', 'U', 'C']:
+                    metrics[model_type][model_name][ctype] = {
+                        'pitch_metrics': e.evaluate_pitch(fname_dir, fname_list),
+                        # 'content_metrics': e.evaluate_content(fname_dir, fname_list),
+                        'rhythm_metrics': e.evaluate_rhythm(fname_dir, fname_list),
+                        'timbre_metrics': e.evaluate_timbre(fname_dir, fname_list),
+                    }
 
     dict2json(metrics, 'metrics.json')

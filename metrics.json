@@ -1,13 +1,25 @@
 {
     "spsp2": {
-        "R_1_32": {
+        "wide_CR_8_8": {
             "R": {
-                "src_cnt": 15,
-                "tgt_cnt": 25
+                "rhythm_metrics": {
+                    "src_cnt": 14,
+                    "tgt_cnt": 26
+                },
+                "timbre_metrics": {
+                    "src_cos_smi": 0.5430969715118408,
+                    "tgt_cos_smi": 0.03735730648040771
+                }
             },
             "U": {
-                "src_cos_smi": 0.07935037612915039,
-                "tgt_cos_smi": 0.5308664321899415
+                "rhythm_metrics": {
+                    "src_cnt": 21,
+                    "tgt_cnt": 19
+                },
+                "timbre_metrics": {
+                    "src_cos_smi": 0.07270756959915162,
+                    "tgt_cos_smi": 0.5390112400054932
+                }
             }
         }
     }
