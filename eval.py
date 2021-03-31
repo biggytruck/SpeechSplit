@@ -63,6 +63,7 @@ class Evaluator(object):
                                 jiwer.RemoveWhiteSpace(replace_by_space=False)
                                 # jiwer.SentencesToListOfWords(word_delimiter=" ")
                             ]) 
+        self.invalid_f0 = 0
 
 
     def get_asr_result(self, content):
@@ -103,18 +104,20 @@ class Evaluator(object):
     def get_gpe(self, f0s, pred_f0s, delta=0.2):
         Nerr = 0
         Nvv = 0
-        for f0, pred_f0 in zip(f0, pred_f0s):
+        for f0, pred_f0 in zip(f0s, pred_f0s):
             if f0 > 1e-6 and pred_f0 > 1e-6:
                 Nvv += 1
                 if abs(pred_f0/f0 - 1) > delta:
                     Nerr += 1
+        if Nvv == 0:
+            self.invalid_f0 += 1
         
-        return Nerr / Nvv
+        return Nerr / Nvv if Nvv else 0
 
 
     def get_ffe(self, f0s, pred_f0s, delta=0.2):
         Nerr = 0
-        for f0, pred_f0 in zip(f0, pred_f0s):
+        for f0, pred_f0 in zip(f0s, pred_f0s):
             if f0 > 1e-6 and pred_f0 <= 1e-6:
                 Nerr += 1
             elif f0 <= 1e-6 and pred_f0 > 1e-6:
@@ -170,8 +173,6 @@ class Evaluator(object):
             tgt_wav_id = fname.split('_')[3]
             tgt_txt = txt_dict[tgt_wav_id]
 
-            print("source text: %s, target text: %s, converted text: %s"%(src_txt, tgt_txt, cvt_txt))
-
             src_wer += self.get_wer(tgt_txt, src_txt)
             cvt_wer += self.get_wer(tgt_txt, cvt_txt)
 
@@ -198,19 +199,22 @@ class Evaluator(object):
 
             src_name = os.path.join(fname_dir, fname+'_s.wav')
             src_wav, fs = read(src_name)
-            src_f0 = extract_f0(src_wav, fs, lo[src_gen], hi[src_gen])
+            src_f0 = extract_f0(src_wav, fs, lo[src_gen], hi[src_gen])[1]
+            src_f0 = np.pad(src_f0, (0, 192-len(src_f0)), 'constant')
 
             cvt_name = os.path.join(fname_dir, fname+'_c.wav')
             cvt_wav, fs = read(cvt_name)
-            cvt_f0 = extract_f0(cvt_wav, fs, lo[src_gen], hi[src_gen])
+            cvt_f0 = extract_f0(cvt_wav, fs, lo[src_gen], hi[src_gen])[1]
+            cvt_f0 = np.pad(cvt_f0, (0, 192-len(cvt_f0)), 'constant')
 
             src_vde += self.get_vde(src_f0, cvt_f0)
             src_gpe += self.get_gpe(src_f0, cvt_f0)
             src_ffe += self.get_ffe(src_f0, cvt_f0)
 
-        src_vde /= len(fname_list)
-        src_gpe /= len(fname_list)
-        src_ffe /= len(fname_list)
+        src_vde /= len(fname_list)-self.invalid_f0
+        src_gpe /= len(fname_list)-self.invalid_f0
+        src_ffe /= len(fname_list)-self.invalid_f0
+        self.invalid_f0 = 0
 
         tgt_vde = 0
         tgt_gpe = 0
@@ -222,19 +226,22 @@ class Evaluator(object):
 
             tgt_name = os.path.join(fname_dir, fname+'_t.wav')
             tgt_wav, fs = read(tgt_name)
-            tgt_f0 = extract_f0(tgt_wav, fs, lo[tgt_gen], hi[tgt_gen])
+            tgt_f0 = extract_f0(tgt_wav, fs, lo[tgt_gen], hi[tgt_gen])[1]
+            tgt_f0 = np.pad(tgt_f0, (0, 192-len(tgt_f0)), 'constant')
 
             cvt_name = os.path.join(fname_dir, fname+'_c.wav')
             cvt_wav, fs = read(cvt_name)
-            cvt_f0 = extract_f0(cvt_wav, fs, lo[tgt_gen], hi[tgt_gen])
+            cvt_f0 = extract_f0(cvt_wav, fs, lo[tgt_gen], hi[tgt_gen])[1]
+            cvt_f0 = np.pad(cvt_f0, (0, 192-len(cvt_f0)), 'constant')
 
             tgt_vde += self.get_vde(tgt_f0, cvt_f0)
             tgt_gpe += self.get_gpe(tgt_f0, cvt_f0)
             tgt_ffe += self.get_ffe(tgt_f0, cvt_f0)
 
-        tgt_vde /= len(fname_list)
-        tgt_gpe /= len(fname_list)
-        tgt_ffe /= len(fname_list)
+        tgt_vde /= len(fname_list)-self.invalid_f0
+        tgt_gpe /= len(fname_list)-self.invalid_f0
+        tgt_ffe /= len(fname_list)-self.invalid_f0
+        self.invalid_f0 = 0
 
         return {'src_vde': src_vde, \
                 'src_gpe': src_gpe, \
@@ -294,22 +301,22 @@ if __name__ == '__main__':
     test_data_by_ctype = pickle.load(open('eval/assets/test_data_by_ctype.pkl', 'rb'))
     model_type_list = [
         'spsp1',
-        'spsp2',
+        # 'spsp2',
     ]
 
     model_name_list = {
         'R_8_1',
-        'R_1_1',
-        'R_8_32',
-        'R_1_32',
+        # 'R_1_1',
+        # 'R_8_32',
+        # 'R_1_32',
         # 'wide_CR_8_8',
     }
 
     ctype_list = [
         'F',
         # 'C',
-        'R',
-        'U',
+        # 'R',
+        # 'U',
     ]
 
     # initialize metrics

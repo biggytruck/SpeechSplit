@@ -50,13 +50,13 @@ def get_spk_emb(spk_id):
 
     return spk_emb
 
-def convert_pitch(model, rhythm_input, pitch_input):
-    max_len = max(rhythm_input.shape[1], pitch_input.shape[1])
+def convert_pitch(F, rhythm_input, pitch_input):
+    max_len = 192
     rhythm_input = np.pad(rhythm_input, ((0,0), (0,max_len-rhythm_input.shape[1]), (0,0)), 'constant')
     pitch_input = np.pad(pitch_input, ((0,0), (0,max_len-pitch_input.shape[1]), (0,0)), 'constant')
     rhythm_input = torch.from_numpy(rhythm_input).float().to(device)
     pitch_input = torch.from_numpy(pitch_input).float().to(device)
-    pitch_output = model(rhythm_input, pitch_input, rr=False)
+    pitch_output = F(rhythm_input, pitch_input, rr=False)
 
     return pitch_output.cpu().numpy()
 
@@ -95,7 +95,7 @@ def convert(G, F, model_type, ctype, src_path, tgt_path, src_id, tgt_id):
         raptf0 = load_raptf0(src_path)
         spk_emb = get_spk_emb(src_id)
 
-    T = max(spmel.shape[1], spmel_filt.shape[1], raptf0.shape[1])
+    T = 192
     spmel = np.pad(spmel, ((0,0), (0,T-spmel.shape[1]), (0,0)), 'constant')
     spmel_filt = np.pad(spmel_filt, ((0,0), (0,T-spmel_filt.shape[1]), (0,0)), 'constant')
     raptf0 = np.pad(raptf0, ((0,0), (0,T-raptf0.shape[1]), (0,0)), 'constant')
