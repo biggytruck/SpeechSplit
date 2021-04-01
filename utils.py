@@ -58,6 +58,13 @@ def speaker_normalization(f0, index_nonzero, mean_f0, std_f0):
     return f0
 
 
+def inverse_quantize_f0_numpy(x, num_bins=257):
+    assert x.ndim==2
+    y = np.argmax(x, axis=1)
+    y = (y - 1).astype(float)
+    y /= (num_bins-2)
+    return y
+
 
 def quantize_f0_numpy(x, num_bins=256):
     # x is logf0
