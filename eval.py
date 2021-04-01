@@ -135,12 +135,12 @@ class Evaluator(object):
 
     def convert_pitch(self, fname, model_type):
         src_gen = spk2gen[fname.split('_')[0]]
-        src_name = os.path.join(fname_dir, fname+'_s.wav')
+        src_name = os.path.join(fname_dir, fname+'_t.wav')
         src_wav, fs = read(src_name)
         rhythm_input = self._get_rhythm_input(src_wav, model_type)
 
         tgt_gen = spk2gen[fname.split('_')[2]]
-        tgt_name = os.path.join(fname_dir, fname+'_t.wav')
+        tgt_name = os.path.join(fname_dir, fname+'_c.wav')
         tgt_wav, fs = read(tgt_name)
         pitch_input = self._get_pitch_input(tgt_wav, fs, tgt_gen)
 
@@ -150,11 +150,9 @@ class Evaluator(object):
         rhythm_input = torch.from_numpy(rhythm_input).float().to(device)
         pitch_input = torch.from_numpy(pitch_input).float().to(device)
         pitch_output = F(rhythm_input, pitch_input, rr=False)[0].cpu().numpy()
-        pitch_output_one_hot = np.zeros_like(pitch_output)
-        pitch_output_one_hot[np.arange(len(pitch_output)), pitch_output.argmax(1)] = 1
         pitch_output = inverse_quantize_f0_numpy(pitch_output)
 
-        return pitch_output, pitch_output_one_hot
+        return pitch_output
 
     def evaluate_rhythm(self, fname_dir, fname_list):
         speaking_rate = get_speaking_rate(fname_dir) # key: file name; value: speaking rate(num_syls / voiced_duration)
@@ -243,16 +241,16 @@ class Evaluator(object):
 
             tgt_gen = spk2gen[fname.split('_')[2]]
 
-            # tgt_name = os.path.join(fname_dir, fname+'_t.wav')
-            # tgt_wav, fs = read(tgt_name)
-            # tgt_f0 = extract_f0(tgt_wav, fs, lo[tgt_gen], hi[tgt_gen])[1]
-            tgt_f0, tgt_f0_one_hot = self.convert_pitch(fname, ctype)
+            tgt_name = os.path.join(fname_dir, fname+'_t.wav')
+            tgt_wav, fs = read(tgt_name)
+            tgt_f0 = extract_f0(tgt_wav, fs, lo[tgt_gen], hi[tgt_gen])[1]
             tgt_f0 = np.pad(tgt_f0, (0, 192-len(tgt_f0)), 'constant')
-            self.tgt.append(tgt_f0_one_hot)
+            self.tgt.append(tgt_f0)
 
-            cvt_name = os.path.join(fname_dir, fname+'_c.wav')
-            cvt_wav, fs = read(cvt_name)
-            cvt_f0 = extract_f0(cvt_wav, fs, lo[tgt_gen], hi[tgt_gen])[1]
+            # cvt_name = os.path.join(fname_dir, fname+'_c.wav')
+            # cvt_wav, fs = read(cvt_name)
+            # cvt_f0 = extract_f0(cvt_wav, fs, lo[tgt_gen], hi[tgt_gen])[1]
+            cvt_f0 = self.convert_pitch(fname, model_type)
             cvt_f0 = np.pad(cvt_f0, (0, 192-len(cvt_f0)), 'constant')
             self.cvt.append(cvt_f0)
 
