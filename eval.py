@@ -5,45 +5,19 @@ from collections import OrderedDict
 from soundfile import read
 import jiwer
 from google.cloud import speech
-from utils import extract_f0, dict2json, filter_wav, get_spmel
+from utils import *
 from model import D_VECTOR
 import numpy as np
 from numpy.random import RandomState
+from synthesis import convert_pitch
 from sklearn.metrics.pairwise import cosine_similarity
 import torch
+from config import get_config
+from model import Generator_6 as F0_Converter
 
 from run_SylNet import get_speaking_rate
+import matplotlib.pyplot as plt
 
-
-wav_dir = 'eval/assets/wavs/'
-spmel_dir = 'eval/assets/spmel/'
-spmel_filt_dir = 'eval/assets/spmel_filt/'
-raptf0_dir = 'eval/assets/raptf0/'
-txt_dir = 'eval/assets/txt/'
-model_dir = 'run/models/speech-split2-find-content-optimal/'
-result_dir = 'eval/results'
-plot_dir = 'eval/plots'
-spk2gen = pickle.load(open('eval/assets/spk2gen.pkl', 'rb'))
-C = D_VECTOR(dim_input=80, dim_cell=768, dim_emb=256).eval().cuda()
-c_checkpoint = torch.load('eval/assets/3000000-BL.ckpt')
-new_state_dict = OrderedDict()
-for key, val in c_checkpoint['model_b'].items():
-    new_key = key[7:]
-    new_state_dict[new_key] = val
-C.load_state_dict(new_state_dict)
-prng = RandomState(1)
-txt_dict = {
-    '001': 'Please call Stella',
-    '010': 'People look, but no one ever finds it',
-    '003001': 'Six spoons of fresh snow peas',
-    '003002': 'five thick slabs of blue cheese',
-    '005002': 'and we will go meet her Wednesday',
-    '006001': 'When the sunlight strikes raindrops in the air',
-    '008001': 'These take the shape of a long round arch',
-    '024001': 'This is a very common type of bow',
-    '024002': 'one showing mainly red and yellow',
-    '024003': 'with little or no green or blue'
-}
 
 class Evaluator(object):
 
@@ -64,6 +38,7 @@ class Evaluator(object):
                                 # jiwer.SentencesToListOfWords(word_delimiter=" ")
                             ]) 
         self.invalid_f0 = 0
+        self.src, self.tgt, self.cvt = [], [], []
 
 
     def get_asr_result(self, content):
@@ -135,6 +110,52 @@ class Evaluator(object):
 
         return content
 
+    def _get_rhythm_input(self, wav, model_type):
+        # compute spectrogram
+        S = get_spmel(wav)
+        if model_type == 'spsp1':
+            S = np.pad(S, ((0, 192-len(S)), (0, 0)), 'constant')
+            return S[np.newaxis, :, :]
+
+        # compute filtered spectrogram
+        S_filt = smooth_spmel(S)
+        S_filt = make_filt_spect(S_filt)
+        S_filt = spectral_subtraction(S_filt)
+        S_filt = np.abs(S_filt)
+        S_filt = zero_one_norm(S_filt)
+
+        S_filt = np.pad(S_filt, ((0, 192-len(S_filt)), (0, 0)), 'constant')
+        return S_filt[np.newaxis, :, :]
+
+    def _get_pitch_input(self, wav, fs, gen):
+        f0 = extract_f0(wav, fs, lo[gen], hi[gen])[1]
+        f0 = quantize_f0_numpy(f0)[0]
+        f0 = np.pad(f0, ((0, 192-len(f0)), (0, 0)), 'constant')
+        return f0[np.newaxis, :, :]
+
+    def convert_pitch(self, fname, model_type):
+        src_gen = spk2gen[fname.split('_')[0]]
+        src_name = os.path.join(fname_dir, fname+'_s.wav')
+        src_wav, fs = read(src_name)
+        rhythm_input = self._get_rhythm_input(src_wav, model_type)
+
+        tgt_gen = spk2gen[fname.split('_')[2]]
+        tgt_name = os.path.join(fname_dir, fname+'_t.wav')
+        tgt_wav, fs = read(tgt_name)
+        pitch_input = self._get_pitch_input(tgt_wav, fs, tgt_gen)
+
+        max_len = max(rhythm_input.shape[1], pitch_input.shape[1])
+        rhythm_input = np.pad(rhythm_input, ((0,0), (0,max_len-rhythm_input.shape[1]), (0,0)), 'constant')
+        pitch_input = np.pad(pitch_input, ((0,0), (0,max_len-pitch_input.shape[1]), (0,0)), 'constant')
+        rhythm_input = torch.from_numpy(rhythm_input).float().to(device)
+        pitch_input = torch.from_numpy(pitch_input).float().to(device)
+        pitch_output = F(rhythm_input, pitch_input, rr=False)[0].cpu().numpy()
+        pitch_output_one_hot = np.zeros_like(pitch_output)
+        pitch_output_one_hot[np.arange(len(pitch_output)), pitch_output.argmax(1)] = 1
+        pitch_output = inverse_quantize_f0_numpy(pitch_output)
+
+        return pitch_output, pitch_output_one_hot
+
     def evaluate_rhythm(self, fname_dir, fname_list):
         speaking_rate = get_speaking_rate(fname_dir) # key: file name; value: speaking rate(num_syls / voiced_duration)
         src_cnt, tgt_cnt = 0, 0
@@ -184,10 +205,7 @@ class Evaluator(object):
                 'cvt_wer': cvt_wer, \
                 'rel_wer': rel_wer}
 
-    def evaluate_pitch(self, fname_dir, fname_list):
-
-        lo = {'M': 50, 'F': 100}
-        hi = {'M': 250, 'F': 600}
+    def evaluate_pitch(self, fname_dir, fname_list, ctype):
 
         src_vde = 0
         src_gpe = 0
@@ -201,6 +219,7 @@ class Evaluator(object):
             src_wav, fs = read(src_name)
             src_f0 = extract_f0(src_wav, fs, lo[src_gen], hi[src_gen])[1]
             src_f0 = np.pad(src_f0, (0, 192-len(src_f0)), 'constant')
+            self.src.append(src_f0)
 
             cvt_name = os.path.join(fname_dir, fname+'_c.wav')
             cvt_wav, fs = read(cvt_name)
@@ -224,15 +243,18 @@ class Evaluator(object):
 
             tgt_gen = spk2gen[fname.split('_')[2]]
 
-            tgt_name = os.path.join(fname_dir, fname+'_t.wav')
-            tgt_wav, fs = read(tgt_name)
-            tgt_f0 = extract_f0(tgt_wav, fs, lo[tgt_gen], hi[tgt_gen])[1]
+            # tgt_name = os.path.join(fname_dir, fname+'_t.wav')
+            # tgt_wav, fs = read(tgt_name)
+            # tgt_f0 = extract_f0(tgt_wav, fs, lo[tgt_gen], hi[tgt_gen])[1]
+            tgt_f0, tgt_f0_one_hot = self.convert_pitch(fname, ctype)
             tgt_f0 = np.pad(tgt_f0, (0, 192-len(tgt_f0)), 'constant')
+            self.tgt.append(tgt_f0_one_hot)
 
             cvt_name = os.path.join(fname_dir, fname+'_c.wav')
             cvt_wav, fs = read(cvt_name)
             cvt_f0 = extract_f0(cvt_wav, fs, lo[tgt_gen], hi[tgt_gen])[1]
             cvt_f0 = np.pad(cvt_f0, (0, 192-len(cvt_f0)), 'constant')
+            self.cvt.append(cvt_f0)
 
             tgt_vde += self.get_vde(tgt_f0, cvt_f0)
             tgt_gpe += self.get_gpe(tgt_f0, cvt_f0)
@@ -260,14 +282,14 @@ class Evaluator(object):
             src_wav, fs = read(src_name)
             src_wav = filter_wav(src_wav, prng)
             src_spmel = get_spmel(src_wav).astype(np.float32)
-            src_spmel = torch.from_numpy(src_spmel[np.newaxis, :, :]).cuda()
+            src_spmel = torch.from_numpy(src_spmel[np.newaxis, :, :]).to(device)
             src_emb = C(src_spmel).detach().cpu().numpy()
 
             cvt_name = os.path.join(fname_dir, fname+'_c.wav')
             cvt_wav, fs = read(cvt_name)
             cvt_wav = filter_wav(cvt_wav, prng)
             cvt_spmel = get_spmel(cvt_wav).astype(np.float32)
-            cvt_spmel = torch.from_numpy(cvt_spmel[np.newaxis, :, :]).cuda()
+            cvt_spmel = torch.from_numpy(cvt_spmel[np.newaxis, :, :]).to(device)
             cvt_emb = C(cvt_spmel).detach().cpu().numpy()
 
             src_cos_sim += cosine_similarity(src_emb, cvt_emb)[0]
@@ -280,14 +302,14 @@ class Evaluator(object):
             tgt_wav, fs = read(tgt_name)
             tgt_wav = filter_wav(tgt_wav, prng)
             tgt_spmel = get_spmel(tgt_wav).astype(np.float32)
-            tgt_spmel = torch.from_numpy(tgt_spmel[np.newaxis, :, :]).cuda()
+            tgt_spmel = torch.from_numpy(tgt_spmel[np.newaxis, :, :]).to(device)
             tgt_emb = C(tgt_spmel).detach().cpu().numpy()
 
             cvt_name = os.path.join(fname_dir, fname+'_c.wav')
             cvt_wav, fs = read(cvt_name)
             cvt_wav = filter_wav(cvt_wav, prng)
             cvt_spmel = get_spmel(cvt_wav).astype(np.float32)
-            cvt_spmel = torch.from_numpy(cvt_spmel[np.newaxis, :, :]).cuda()
+            cvt_spmel = torch.from_numpy(cvt_spmel[np.newaxis, :, :]).to(device)
             cvt_emb = C(cvt_spmel).detach().cpu().numpy()
 
             tgt_cos_sim += cosine_similarity(tgt_emb, cvt_emb)[0]
@@ -295,22 +317,66 @@ class Evaluator(object):
         return {'src_cos_smi': src_cos_sim.item()/len(fname_list), \
                 'tgt_cos_smi': tgt_cos_sim.item()/len(fname_list)}
 
+    def plot(self):
+        for i, (src, tgt, cvt) in enumerate(zip(self.src, self.tgt, self.cvt)):
+            fig, (ax1,ax2,ax3) = plt.subplots(3, 1, sharex=True, figsize=(12, 10))
+            _ = ax1.imshow(quantize_f0_numpy(src)[0].T, aspect='auto')
+            _ = ax2.imshow(tgt.T, aspect='auto')
+            _ = ax3.imshow(quantize_f0_numpy(cvt)[0].T, aspect='auto')
+            plt.savefig(f'plots/{i+1}.png', dpi=150)
+            plt.close(fig)
+
 if __name__ == '__main__':
 
     e = Evaluator()
+    config = get_config()
+    device = 'cpu'
     test_data_by_ctype = pickle.load(open('eval/assets/test_data_by_ctype.pkl', 'rb'))
+    wav_dir = 'eval/assets/wavs/'
+    spmel_dir = 'eval/assets/spmel/'
+    spmel_filt_dir = 'eval/assets/spmel_filt/'
+    raptf0_dir = 'eval/assets/raptf0/'
+    txt_dir = 'eval/assets/txt/'
+    model_dir = 'eval/models'
+    result_dir = 'eval/results'
+    plot_dir = 'eval/plots'
+    spk2gen = pickle.load(open('eval/assets/spk2gen.pkl', 'rb'))
+    C = D_VECTOR(dim_input=80, dim_cell=768, dim_emb=256).eval().to(device)
+    c_checkpoint = torch.load('eval/assets/3000000-BL.ckpt', map_location=lambda storage, loc: storage)
+    new_state_dict = OrderedDict()
+    for key, val in c_checkpoint['model_b'].items():
+        new_key = key[7:]
+        new_state_dict[new_key] = val
+    C.load_state_dict(new_state_dict)
+    prng = RandomState(1)
+    txt_dict = {
+        '001': 'Please call Stella',
+        '010': 'People look, but no one ever finds it',
+        '003001': 'Six spoons of fresh snow peas',
+        '003002': 'five thick slabs of blue cheese',
+        '005002': 'and we will go meet her Wednesday',
+        '006001': 'When the sunlight strikes raindrops in the air',
+        '008001': 'These take the shape of a long round arch',
+        '024001': 'This is a very common type of bow',
+        '024002': 'one showing mainly red and yellow',
+        '024003': 'with little or no green or blue'
+    }
+    lo = {'M': 50, 'F': 100}
+    hi = {'M': 250, 'F': 600}
+
+    
     model_type_list = [
         'spsp1',
         # 'spsp2',
     ]
 
-    model_name_list = {
-        'R_8_1',
-        # 'R_1_1',
-        # 'R_8_32',
-        # 'R_1_32',
-        # 'wide_CR_8_8',
-    }
+    settings = {
+                'R_8_1': [8,8,8,8,1,32],
+                # 'R_1_1': [8,1,8,8,1,32],
+                # 'R_8_32': [8,8,8,8,32,32],
+                # 'R_1_32': [8,1,8,8,32,32],
+                # 'wide_CR_8_8': [8,1,8,8,32,32],
+                }
 
     ctype_list = [
         'F',
@@ -323,27 +389,48 @@ if __name__ == '__main__':
     metrics = {}
     for model_type in model_type_list:
         metrics[model_type] = {}
-        for model_name in model_name_list:
+        for model_name in settings.keys():
             metrics[model_type][model_name] = {}
             for ctype in ctype_list:
                 metrics[model_type][model_name][ctype] = {}
 
     # get metrics
-    for model_type in model_type_list:
-        for model_name in model_name_list:
-            for ctype in ctype_list:
-                pairs = test_data_by_ctype[ctype]
-                fname_list = []
-                for (src_name, src_id), (tgt_name, tgt_id) in pairs:
-                    fname_list.append(src_name.split('/')[-1]+'_'+tgt_name.split('/')[-1])
-                fname_dir = os.path.join(result_dir, model_type, model_name, ctype)
+    with torch.no_grad():
+        for model_type in model_type_list:
+            for model_name, params in settings.items():
+                config.model_name = model_name
+                config.freq = params[0]
+                config.freq_2 = params[1]
+                config.freq_3 = params[2]
+                config.dim_neck = params[3]
+                config.dim_neck_2 = params[4]
+                config.dim_neck_3 = params[5]
 
-                if ctype in ['F', 'R', 'U', 'C']:
-                    metrics[model_type][model_name][ctype] = {
-                        'pitch_metrics': e.evaluate_pitch(fname_dir, fname_list),
-                        # 'content_metrics': e.evaluate_content(fname_dir, fname_list),
-                        'rhythm_metrics': e.evaluate_rhythm(fname_dir, fname_list),
-                        'timbre_metrics': e.evaluate_timbre(fname_dir, fname_list),
-                    }
+                F = F0_Converter(config).eval().to(device)
+                ckpt = torch.load(os.path.join(model_dir, model_type, model_name+'-F-'+'best.ckpt'), \
+                                  map_location=lambda storage, loc: storage)
+                try:
+                    F.load_state_dict(ckpt['model'])
+                except:
+                    new_state_dict = OrderedDict()
+                    for k, v in ckpt['model'].items():
+                        new_state_dict[k[7:]] = v
+                    F.load_state_dict(new_state_dict)
+
+                for ctype in ctype_list:
+                    pairs = test_data_by_ctype[ctype]
+                    fname_list = []
+                    for (src_name, src_id), (tgt_name, tgt_id) in pairs:
+                        fname_list.append(src_name.split('/')[-1]+'_'+tgt_name.split('/')[-1])
+                    fname_dir = os.path.join(result_dir, model_type, model_name, ctype)
+
+                    if ctype in ['F', 'R', 'U', 'C']:
+                        metrics[model_type][model_name][ctype] = {
+                            'pitch_metrics': e.evaluate_pitch(fname_dir, fname_list, model_type),
+                            # 'content_metrics': e.evaluate_content(fname_dir, fname_list),
+                            'rhythm_metrics': e.evaluate_rhythm(fname_dir, fname_list),
+                            'timbre_metrics': e.evaluate_timbre(fname_dir, fname_list),
+                        }
+                    e.plot()
 
     dict2json(metrics, 'metrics.json')
