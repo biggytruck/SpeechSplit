@@ -95,7 +95,7 @@ def convert(G, F, model_type, ctype, src_path, tgt_path, src_id, tgt_id):
         raptf0 = load_raptf0(src_path)
         spk_emb = get_spk_emb(src_id)
 
-    T = max(spmel.shape[1], spmel_filt.shape[1], raptf0.shape[1])
+    T = 192
     spmel = np.pad(spmel, ((0,0), (0,T-spmel.shape[1]), (0,0)), 'constant')
     spmel_filt = np.pad(spmel_filt, ((0,0), (0,T-spmel_filt.shape[1]), (0,0)), 'constant')
     raptf0 = np.pad(raptf0, ((0,0), (0,T-raptf0.shape[1]), (0,0)), 'constant')
@@ -188,6 +188,34 @@ class Synthesizer(object):
 
         return y_hat
 
+    def batchspect2wav(self, c=None, tqdm=tqdm):
+        self.model.eval()
+        self.model.make_generation_fast_()
+
+        B = c.size(0)
+        Tc = c.size(1)
+        upsample_factor = wavenet_hparams.hop_size
+        # Overwrite length according to feature size
+        length = Tc * upsample_factor
+
+        # B x C x T
+        c = torch.FloatTensor(c.permute(0, 2, 1))
+
+        initial_input = torch.zeros(B, 1, 1).fill_(0.0)
+
+        # Transform data to GPU
+        initial_input = initial_input.to(device)
+        c = None if c is None else c.to(device)
+
+        with torch.no_grad():
+            y_hat = self.model.incremental_forward(
+                initial_input, c=c, g=None, T=length, tqdm=tqdm, softmax=True, quantize=True,
+                log_scale_min=wavenet_hparams.log_scale_min)
+
+        y_hat = y_hat.view(B, -1).cpu().data.numpy()
+
+        return y_hat
+
     def file2wav(self, fname):
         spect = np.load(fname)
         return self.spect2wav(c=spect)
@@ -227,6 +255,9 @@ if __name__ == '__main__':
         'R',
         'U',
     ]
+
+    cvt_spmel_list = []
+    cvt_save_path_list = []
 
     with torch.no_grad():
         for model_type in model_type_list:
@@ -276,9 +307,21 @@ if __name__ == '__main__':
                         write(tgt_save_path, tgt_wav, fs)
 
                         cvt_spmel = convert(G, F, model_type, ctype, src_name+'.npy', tgt_name+'.npy', src_id, tgt_id)
-                        cvt_wav = s.spect2wav(c=cvt_spmel)
                         cvt_save_path = os.path.join(result_dir, model_type, model_name, ctype, fname+'_c.wav')
-                        write(cvt_save_path, cvt_wav, fs)
-
+                        cvt_spmel_list.append(cvt_spmel)
+                        cvt_save_path_list.append(cvt_save_path)
+                        if len(cvt_save_path_list)==16:
+                            cvt_spmel_batch = torch.nn.utils.rnn.pad_sequence(cvt_spmel_list, batch_first=False)
+                            cvt_wav_batch = s.batchspect2wav(c=cvt_spmel_batch)
+                            for path, wav in zip(cvt_save_path_list, cvt_wav_batch):
+                                write(path, wav, fs)
+                            cvt_spmel_list = []
+                            cvt_save_path_list = []
+                        
                         plot_path = os.path.join(plot_dir, model_type, model_name, ctype, fname+'.png')
                         draw_plot(src_spmel, tgt_spmel, cvt_spmel, plot_path)
+
+        cvt_spmel_batch = torch.nn.utils.rnn.pad_sequence(cvt_spmel_list, batch_first=False)
+        cvt_wav_batch = s.batchspect2wav(c=cvt_spmel_batch)
+        for path, wav in zip(cvt_save_path_list, cvt_wav_batch):
+            write(path, wav, fs)
