@@ -38,7 +38,7 @@ class Evaluator(object):
                                 # jiwer.SentencesToListOfWords(word_delimiter=" ")
                             ]) 
         self.invalid_f0 = 0
-        self.src, self.tgt, self.cvt = [], [], []
+        self.src, self.tgt, self.src_cvt, self.tgt_cvt = [], [], [], []
 
 
     def get_asr_result(self, content):
@@ -223,6 +223,7 @@ class Evaluator(object):
             cvt_wav, fs = read(cvt_name)
             cvt_f0 = extract_f0(cvt_wav, fs, lo[src_gen], hi[src_gen])[1]
             cvt_f0 = np.pad(cvt_f0, (0, 192-len(cvt_f0)), 'constant')
+            self.src_cvt.append(cvt_f0)
 
             src_vde += self.get_vde(src_f0, cvt_f0)
             src_gpe += self.get_gpe(src_f0, cvt_f0)
@@ -241,18 +242,16 @@ class Evaluator(object):
 
             tgt_gen = spk2gen[fname.split('_')[2]]
 
-            tgt_name = os.path.join(fname_dir, fname+'_t.wav')
-            tgt_wav, fs = read(tgt_name)
-            tgt_f0 = extract_f0(tgt_wav, fs, lo[tgt_gen], hi[tgt_gen])[1]
+            tgt_name = os.path.join(fname_dir, fname+'_c.npy')
+            tgt_f0 = np.load(tgt_name)
             tgt_f0 = np.pad(tgt_f0, (0, 192-len(tgt_f0)), 'constant')
             self.tgt.append(tgt_f0)
 
-            # cvt_name = os.path.join(fname_dir, fname+'_c.wav')
-            # cvt_wav, fs = read(cvt_name)
-            # cvt_f0 = extract_f0(cvt_wav, fs, lo[tgt_gen], hi[tgt_gen])[1]
-            cvt_f0 = self.convert_pitch(fname, model_type)
+            cvt_name = os.path.join(fname_dir, fname+'_c.wav')
+            cvt_wav, fs = read(cvt_name)
+            cvt_f0 = extract_f0(cvt_wav, fs, lo[tgt_gen], hi[tgt_gen])[1]
             cvt_f0 = np.pad(cvt_f0, (0, 192-len(cvt_f0)), 'constant')
-            self.cvt.append(cvt_f0)
+            self.tgt_cvt.append(cvt_f0)
 
             tgt_vde += self.get_vde(tgt_f0, cvt_f0)
             tgt_gpe += self.get_gpe(tgt_f0, cvt_f0)
@@ -316,13 +315,19 @@ class Evaluator(object):
                 'tgt_cos_smi': tgt_cos_sim.item()/len(fname_list)}
 
     def plot(self):
-        for i, (src, tgt, cvt) in enumerate(zip(self.src, self.tgt, self.cvt)):
-            fig, (ax1,ax2,ax3) = plt.subplots(3, 1, sharex=True, figsize=(12, 10))
+        for i, (src, src_cvt, tgt, tgt_cvt) in enumerate(zip(self.src, self.src_cvt, self.tgt, self.tgt_cvt)):
+            fig, (ax1,ax2,ax3,ax4) = plt.subplots(4, 1, sharex=True, figsize=(12, 10))
+            ax1.set_title('Source pitch', fontsize=10)
+            ax2.set_title('Converted pitch in source rhythm', fontsize=10)
+            ax3.set_title('Target pitch', fontsize=10)
+            ax4.set_title('Converted pitch in target rhythm', fontsize=10)
             _ = ax1.imshow(quantize_f0_numpy(src)[0].T, aspect='auto')
-            _ = ax2.imshow(tgt.T, aspect='auto')
-            _ = ax3.imshow(quantize_f0_numpy(cvt)[0].T, aspect='auto')
+            _ = ax2.imshow(quantize_f0_numpy(src_cvt)[0].T, aspect='auto')
+            _ = ax3.imshow(quantize_f0_numpy(tgt)[0].T, aspect='auto')
+            _ = ax4.imshow(quantize_f0_numpy(tgt_cvt)[0].T, aspect='auto')
             plt.savefig(f'plots/{i+1}.png', dpi=150)
             plt.close(fig)
+        self.src, self.tgt, self.src_cvt, self.tgt_cvt = [], [], [], []
 
 if __name__ == '__main__':
 
@@ -365,22 +370,21 @@ if __name__ == '__main__':
     
     model_type_list = [
         'spsp1',
-        # 'spsp2',
+        'spsp2',
     ]
 
     settings = {
                 'R_8_1': [8,8,8,8,1,32],
-                # 'R_1_1': [8,1,8,8,1,32],
-                # 'R_8_32': [8,8,8,8,32,32],
-                # 'R_1_32': [8,1,8,8,32,32],
-                # 'wide_CR_8_8': [8,1,8,8,32,32],
+                'R_1_1': [8,1,8,8,1,32],
+                'R_8_32': [8,8,8,8,32,32],
+                'R_1_32': [8,1,8,8,32,32],
                 }
 
     ctype_list = [
         'F',
-        # 'C',
-        # 'R',
-        # 'U',
+        'C',
+        'R',
+        'U',
     ]
 
     # initialize metrics
@@ -425,10 +429,8 @@ if __name__ == '__main__':
                     if ctype in ['F', 'R', 'U', 'C']:
                         metrics[model_type][model_name][ctype] = {
                             'pitch_metrics': e.evaluate_pitch(fname_dir, fname_list, model_type),
-                            # 'content_metrics': e.evaluate_content(fname_dir, fname_list),
                             'rhythm_metrics': e.evaluate_rhythm(fname_dir, fname_list),
                             'timbre_metrics': e.evaluate_timbre(fname_dir, fname_list),
                         }
-                    e.plot()
 
     dict2json(metrics, 'metrics.json')

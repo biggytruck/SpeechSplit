@@ -8,7 +8,7 @@ import os
 import random
 import pickle
 from soundfile import read, write
-from utils import get_spmel, quantize_f0_numpy
+from utils import get_spmel, quantize_f0_numpy, inverse_quantize_f0_numpy
 from model import Generator_3 as Generator
 from model import Generator_6 as F0_Converter
 from config import get_config
@@ -60,24 +60,29 @@ def convert_pitch(F, rhythm_input, pitch_input):
 
     return pitch_output.cpu().numpy()
 
-def convert(G, F, model_type, ctype, src_path, tgt_path, src_id, tgt_id):
+def convert(G, F, model_type, ctype, src_path, tgt_path, src_id, tgt_id, cvt_f0_gd_save_path):
     if ctype == 'R':
         spmel = load_spmel(src_path)
-        spmel_filt = load_spmel_filt(tgt_path)
+        if model_type == 'spsp1':
+            spmel_filt = load_spmel(tgt_path)
+        else:
+            spmel_filt = load_spmel_filt(tgt_path)
         raptf0 = load_raptf0(src_path)
         spk_emb = get_spk_emb(src_id)
     elif ctype == 'C':
-        spmel = load_spmel(tgt_path)
-        spmel_filt = load_spmel_filt(src_path)
-        raptf0 = load_raptf0(src_path)
+        spmel = load_spmel(src_path)
         if model_type == 'spsp1':
-            raptf0 = convert_pitch(F, spmel, raptf0)
+            spmel_filt = load_spmel(tgt_path)
         else:
-            raptf0 = convert_pitch(F, spmel_filt, raptf0)
+            spmel_filt = load_spmel_filt(tgt_path)
+        raptf0 = load_raptf0(src_path)
         spk_emb = get_spk_emb(src_id)
     elif ctype == 'F':
         spmel = load_spmel(src_path)
-        spmel_filt = load_spmel_filt(src_path)
+        if model_type == 'spsp1':
+            spmel_filt = load_spmel(src_path)
+        else:
+            spmel_filt = load_spmel_filt(src_path)
         raptf0 = load_raptf0(tgt_path)
         if model_type == 'spsp1':
             raptf0 = convert_pitch(F, spmel, raptf0)
@@ -86,7 +91,10 @@ def convert(G, F, model_type, ctype, src_path, tgt_path, src_id, tgt_id):
         spk_emb = get_spk_emb(src_id)
     elif ctype == 'U':
         spmel = load_spmel(src_path)
-        spmel_filt = load_spmel_filt(src_path)
+        if model_type == 'spsp1':
+            spmel_filt = load_spmel(src_path)
+        else:
+            spmel_filt = load_spmel_filt(src_path)
         raptf0 = load_raptf0(src_path)
         spk_emb = get_spk_emb(tgt_id)
     else:
@@ -99,16 +107,14 @@ def convert(G, F, model_type, ctype, src_path, tgt_path, src_id, tgt_id):
     spmel = np.pad(spmel, ((0,0), (0,T-spmel.shape[1]), (0,0)), 'constant')
     spmel_filt = np.pad(spmel_filt, ((0,0), (0,T-spmel_filt.shape[1]), (0,0)), 'constant')
     raptf0 = np.pad(raptf0, ((0,0), (0,T-raptf0.shape[1]), (0,0)), 'constant')
+    np.save(cvt_f0_gd_save_path, inverse_quantize_f0_numpy(raptf0[0]))
 
     spmel = torch.from_numpy(spmel).to(device)
     spmel_filt = torch.from_numpy(spmel_filt).to(device)
     raptf0 = torch.from_numpy(raptf0).to(device)
     spmel_f0 = torch.cat((spmel, raptf0), dim=-1)
     
-    if model_type == 'spsp1':
-        rhythm = G.rhythm(spmel)
-    else:
-        rhythm = G.rhythm(spmel_filt)
+    rhythm = G.rhythm(spmel_filt)
     content, pitch = G.content_pitch(spmel_f0, rr=False)
     spmel_output = G.decode(content, rhythm, pitch, spk_emb, T).cpu().numpy()[0]
 
@@ -239,19 +245,18 @@ if __name__ == '__main__':
     s.load_ckpt(ckpt)
     model_type_list = [
         'spsp1',
-        # 'spsp2',
+        'spsp2',
     ]
     settings = {
                 'R_8_1': [8,8,8,8,1,32],
                 'R_1_1': [8,1,8,8,1,32],
                 'R_8_32': [8,8,8,8,32,32],
                 'R_1_32': [8,1,8,8,32,32],
-                # 'wide_CR_8_8': [8,1,8,8,32,32],
                 }
 
     ctype_list = [
         'F',
-        # 'C',
+        'C',
         'R',
         'U',
     ]
@@ -306,22 +311,23 @@ if __name__ == '__main__':
                         tgt_save_path = os.path.join(result_dir, model_type, model_name, ctype, fname+'_t.wav')
                         write(tgt_save_path, tgt_wav, fs)
 
-                        cvt_spmel = convert(G, F, model_type, ctype, src_name+'.npy', tgt_name+'.npy', src_id, tgt_id)
                         cvt_save_path = os.path.join(result_dir, model_type, model_name, ctype, fname+'_c.wav')
-                        cvt_spmel_list.append(cvt_spmel)
+                        cvt_f0_gd_save_path = os.path.join(result_dir, model_type, model_name, ctype, fname+'_c.npy')
+                        cvt_spmel = convert(G, F, model_type, ctype, src_name+'.npy', tgt_name+'.npy', src_id, tgt_id, cvt_f0_gd_save_path)
+                        cvt_spmel_list.append(torch.from_numpy(cvt_spmel))
                         cvt_save_path_list.append(cvt_save_path)
-                        if len(cvt_save_path_list)==16:
-                            cvt_spmel_batch = torch.nn.utils.rnn.pad_sequence(cvt_spmel_list, batch_first=False)
+                        if len(cvt_save_path_list)==120:
+                            cvt_spmel_batch = torch.nn.utils.rnn.pad_sequence(cvt_spmel_list, batch_first=True)
                             cvt_wav_batch = s.batchspect2wav(c=cvt_spmel_batch)
                             for path, wav in zip(cvt_save_path_list, cvt_wav_batch):
                                 write(path, wav, fs)
                             cvt_spmel_list = []
                             cvt_save_path_list = []
-                        
                         plot_path = os.path.join(plot_dir, model_type, model_name, ctype, fname+'.png')
                         draw_plot(src_spmel, tgt_spmel, cvt_spmel, plot_path)
 
-        cvt_spmel_batch = torch.nn.utils.rnn.pad_sequence(cvt_spmel_list, batch_first=False)
-        cvt_wav_batch = s.batchspect2wav(c=cvt_spmel_batch)
-        for path, wav in zip(cvt_save_path_list, cvt_wav_batch):
-            write(path, wav, fs)
+        if cvt_spmel_list:
+            cvt_spmel_batch = torch.nn.utils.rnn.pad_sequence(cvt_spmel_list, batch_first=True)
+            cvt_wav_batch = s.batchspect2wav(c=cvt_spmel_batch)
+            for path, wav in zip(cvt_save_path_list, cvt_wav_batch):
+                write(path, wav, fs)
