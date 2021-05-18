@@ -2,7 +2,7 @@ import os
 import pickle
 from collections import OrderedDict
 
-from soundfile import read
+from soundfile import read, write
 import jiwer
 from google.cloud import speech
 from utils import *
@@ -39,6 +39,7 @@ class Evaluator(object):
                             ]) 
         self.invalid_f0 = 0
         self.src, self.tgt, self.src_cvt, self.tgt_cvt = [], [], [], []
+        self.src_wav, self.tgt_wav, self.cvt_wav = [], [], []
 
 
     def get_asr_result(self, content):
@@ -203,12 +204,17 @@ class Evaluator(object):
                 'cvt_wer': cvt_wer, \
                 'rel_wer': rel_wer}
 
-    def evaluate_pitch(self, fname_dir, fname_list, ctype):
+    def evaluate_pitch(self, fname_dir, fname_list):
 
         src_vde = 0
         src_gpe = 0
         src_ffe = 0
         
+        for fname in fname_list:
+            self.src_wav.append(os.path.join(fname_dir, fname+'_s.wav'))
+            self.tgt_wav.append(os.path.join(fname_dir, fname+'_t.wav'))
+            self.cvt_wav.append(os.path.join(fname_dir, fname+'_c.wav'))
+
         for fname in fname_list:
 
             src_gen = spk2gen[fname.split('_')[0]]
@@ -229,9 +235,9 @@ class Evaluator(object):
             src_gpe += self.get_gpe(src_f0, cvt_f0)
             src_ffe += self.get_ffe(src_f0, cvt_f0)
 
-        src_vde /= len(fname_list)-self.invalid_f0
-        src_gpe /= len(fname_list)-self.invalid_f0
-        src_ffe /= len(fname_list)-self.invalid_f0
+        src_vde /= (len(fname_list)-self.invalid_f0)
+        src_gpe /= (len(fname_list)-self.invalid_f0)
+        src_ffe /= (len(fname_list)-self.invalid_f0)
         self.invalid_f0 = 0
 
         tgt_vde = 0
@@ -240,7 +246,7 @@ class Evaluator(object):
         
         for fname in fname_list:
 
-            tgt_gen = spk2gen[fname.split('_')[2]]
+            src_gen = spk2gen[fname.split('_')[0]]
 
             tgt_name = os.path.join(fname_dir, fname+'_c.npy')
             tgt_f0 = np.load(tgt_name)
@@ -249,7 +255,7 @@ class Evaluator(object):
 
             cvt_name = os.path.join(fname_dir, fname+'_c.wav')
             cvt_wav, fs = read(cvt_name)
-            cvt_f0 = extract_f0(cvt_wav, fs, lo[tgt_gen], hi[tgt_gen])[1]
+            cvt_f0 = extract_f0(cvt_wav, fs, lo[src_gen], hi[src_gen])[1]
             cvt_f0 = np.pad(cvt_f0, (0, 192-len(cvt_f0)), 'constant')
             self.tgt_cvt.append(cvt_f0)
 
@@ -257,9 +263,9 @@ class Evaluator(object):
             tgt_gpe += self.get_gpe(tgt_f0, cvt_f0)
             tgt_ffe += self.get_ffe(tgt_f0, cvt_f0)
 
-        tgt_vde /= len(fname_list)-self.invalid_f0
-        tgt_gpe /= len(fname_list)-self.invalid_f0
-        tgt_ffe /= len(fname_list)-self.invalid_f0
+        tgt_vde /= (len(fname_list)-self.invalid_f0)
+        tgt_gpe /= (len(fname_list)-self.invalid_f0)
+        tgt_ffe /= (len(fname_list)-self.invalid_f0)
         self.invalid_f0 = 0
 
         return {'src_vde': src_vde, \
@@ -314,6 +320,15 @@ class Evaluator(object):
         return {'src_cos_smi': src_cos_sim.item()/len(fname_list), \
                 'tgt_cos_smi': tgt_cos_sim.item()/len(fname_list)}
 
+    def save_wav(self):
+        for src_name, tgt_name, cvt_name in zip(self.src_wav, self.tgt_wav, self.cvt_wav):
+            src_wav, fs = read(src_name)  
+            tgt_wav, fs = read(tgt_name)  
+            cvt_wav, fs = read(cvt_name)    
+            write(f'debug/{os.path.basename(src_name)}', src_wav, fs)
+            write(f'debug/{os.path.basename(tgt_name)}', tgt_wav, fs)
+            write(f'debug/{os.path.basename(cvt_name)}', cvt_wav, fs)
+
     def plot(self):
         for i, (src, src_cvt, tgt, tgt_cvt) in enumerate(zip(self.src, self.src_cvt, self.tgt, self.tgt_cvt)):
             fig, (ax1,ax2,ax3,ax4) = plt.subplots(4, 1, sharex=True, figsize=(12, 10))
@@ -325,8 +340,11 @@ class Evaluator(object):
             _ = ax2.imshow(quantize_f0_numpy(src_cvt)[0].T, aspect='auto')
             _ = ax3.imshow(quantize_f0_numpy(tgt)[0].T, aspect='auto')
             _ = ax4.imshow(quantize_f0_numpy(tgt_cvt)[0].T, aspect='auto')
-            plt.savefig(f'plots/{i+1}.png', dpi=150)
+            plt.savefig(f'debug/{i+1}.png', dpi=150)
             plt.close(fig)
+
+    def cleanup(self):
+        self.src_wav, self.tgt_wav, self.cvt_wav = [], [], []
         self.src, self.tgt, self.src_cvt, self.tgt_cvt = [], [], [], []
 
 if __name__ == '__main__':
@@ -375,14 +393,14 @@ if __name__ == '__main__':
 
     settings = {
                 'R_8_1': [8,8,8,8,1,32],
-                'R_1_1': [8,1,8,8,1,32],
-                'R_8_32': [8,8,8,8,32,32],
+                # 'R_1_1': [8,1,8,8,1,32],
+                # 'R_8_32': [8,8,8,8,32,32],
                 'R_1_32': [8,1,8,8,32,32],
                 }
 
     ctype_list = [
         'F',
-        'C',
+        # 'C',
         'R',
         'U',
     ]
@@ -425,12 +443,14 @@ if __name__ == '__main__':
                     for (src_name, src_id), (tgt_name, tgt_id) in pairs:
                         fname_list.append(src_name.split('/')[-1]+'_'+tgt_name.split('/')[-1])
                     fname_dir = os.path.join(result_dir, model_type, model_name, ctype)
-
-                    if ctype in ['F', 'R', 'U', 'C']:
-                        metrics[model_type][model_name][ctype] = {
-                            'pitch_metrics': e.evaluate_pitch(fname_dir, fname_list, model_type),
-                            'rhythm_metrics': e.evaluate_rhythm(fname_dir, fname_list),
-                            'timbre_metrics': e.evaluate_timbre(fname_dir, fname_list),
-                        }
+                    metrics[model_type][model_name][ctype] = {
+                        'pitch_metrics': e.evaluate_pitch(fname_dir, fname_list),
+                        'rhythm_metrics': e.evaluate_rhythm(fname_dir, fname_list),
+                        'timbre_metrics': e.evaluate_timbre(fname_dir, fname_list),
+                    }
+                    # if model_type == 'spsp1' and model_name == 'R_8_1' and ctype == 'F':
+                    #     e.save_wav()
+                    #     e.plot()
+                    e.cleanup()
 
     dict2json(metrics, 'metrics.json')
