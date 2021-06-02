@@ -165,16 +165,16 @@ if __name__ == '__main__':
         'spsp2',
     ]
     settings = {
-                # 'R_8_1': [8,8,8,8,1,32],
+                'R_8_1': [8,8,8,8,1,32],
                 # 'R_1_1': [8,1,8,8,1,32],
                 # 'R_8_32': [8,8,8,8,32,32],
                 'R_1_32': [8,1,8,8,32,32],
                 }
 
     ctype_list = [
-        # 'F',
+        'F',
         # 'C',
-        # 'R',
+        'R',
         'U',
     ]
 
@@ -223,20 +223,20 @@ if __name__ == '__main__':
 
                         src_spmel_path = os.path.join(result_path, fname+'_s.wav')
                         src_spmel = np.load(os.path.join(spmel_dir, src_name+'.npy'))
-                        # src_wav, _ = read(os.path.join(src_dir, src_name+'.wav'))
-                        # src_save_path = os.path.join(result_path, fname+'_s.wav')
-                        # write(src_save_path, src_wav, fs)
-                        spmel_list.append(torch.from_numpy(src_spmel))
-                        spmel_path_list.append(src_spmel_path)
+                        src_wav, _ = read(os.path.join(src_dir, src_name+'.wav'))
+                        src_save_path = os.path.join(result_path, fname+'_s.wav')
+                        write(src_save_path, src_wav, fs)
+                        # spmel_list.append(torch.from_numpy(src_spmel))
+                        # spmel_path_list.append(src_spmel_path)
                         # print(src_spmel_path)
 
                         tgt_spmel_path = os.path.join(result_path, fname+'_t.wav')
                         tgt_spmel = np.load(os.path.join(spmel_dir, tgt_name+'.npy'))
-                        # tgt_wav, _ = read(os.path.join(src_dir, tgt_name+'.wav'))
-                        # tgt_save_path = os.path.join(result_path, fname+'_t.wav')
-                        # write(tgt_save_path, tgt_wav, fs)
-                        spmel_list.append(torch.from_numpy(tgt_spmel))
-                        spmel_path_list.append(tgt_spmel_path)
+                        tgt_wav, _ = read(os.path.join(src_dir, tgt_name+'.wav'))
+                        tgt_save_path = os.path.join(result_path, fname+'_t.wav')
+                        write(tgt_save_path, tgt_wav, fs)
+                        # spmel_list.append(torch.from_numpy(tgt_spmel))
+                        # spmel_path_list.append(tgt_spmel_path)
                         # print(tgt_spmel_path)
 
                         cvt_spmel_path = os.path.join(result_path, fname+'_c.wav')

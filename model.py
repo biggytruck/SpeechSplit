@@ -380,6 +380,7 @@ class InterpLnr(nn.Module):
         self.max_len_seg = config.max_len_seg
         
         self.max_num_seg = self.max_len_seq // self.min_len_seg + 1
+        self.training = (config.mode == 'train')
         
         
     def pad_sequences(self, sequences):
