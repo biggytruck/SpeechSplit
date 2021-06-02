@@ -3,32 +3,30 @@ import torch
 import pickle  
 import numpy as np
 
-from functools import partial
-from numpy.random import uniform
 from multiprocessing import Process, Manager  
 
 from torch.utils import data
 from torch.utils.data.sampler import Sampler
 
-from utils import get_spmel, random_warping, time_stretch
+# from utils import get_spmel, random_warping, time_stretch
 
 
 class Utterances(data.Dataset):
     """Dataset class for the Utterances dataset."""
 
-    def __init__(self, wav_dir, spmel_dir, spmel_filt_dir, f0_dir, meta_dir, pickle_name, mode):
+    def __init__(self, config):
         """Initialize and preprocess the Utterances dataset."""
-        self.wav_dir = wav_dir
-        self.spmel_dir = spmel_dir
-        self.spmel_filt_dir = spmel_filt_dir
-        self.f0_dir = f0_dir
-        self.meta_dir = meta_dir
-        self.pickle_name = pickle_name
-        self.mode = mode
-        self.step = 20
-        print('Current processing dataset: ', pickle_name)
+        self.root_dir = os.path.join(config.root_dir, config.mode)
+        self.wav_dir = os.path.join(self.root_dir, config.wav_dir)
+        self.spmel_dir = os.path.join(self.root_dir, config.spmel_dir)
+        self.spmel_filt_dir = os.path.join(self.root_dir, config.spmel_filt_dir)
+        self.spenv_dir = os.path.join(self.root_dir, config.spenv_dir)
+        self.f0_dir = os.path.join(self.root_dir, config.f0_dir)
+        self.mode = config.mode
+        self.step = 5
+        print('Currently processing {} dataset'.format(config.mode))
 
-        metaname = os.path.join(self.meta_dir, pickle_name)
+        metaname = os.path.join(self.root_dir, 'dataset.pkl')
         meta = pickle.load(open(metaname, "rb"))
         
         # load data using multiple processes
@@ -38,7 +36,7 @@ class Utterances(data.Dataset):
         processes = []
         for i in range(0, len(meta), self.step):
             p = Process(target=self.load_data, 
-                        args=(meta[i:i+self.step],dataset,i,mode))  
+                        args=(meta[i:i+self.step],dataset,i))  
             p.start()
             processes.append(p)
         for p in processes:
@@ -47,7 +45,7 @@ class Utterances(data.Dataset):
         self.dataset = list(dataset)
         self.num_tokens = len(self.dataset)
 
-    def load_data(self, submeta, dataset, idx_offset, mode):  
+    def load_data(self, submeta, dataset, idx_offset):  
         for k, sbmt in enumerate(submeta):    
             uttrs = len(sbmt)*[None]
             # fill in speaker id and embedding
@@ -57,8 +55,9 @@ class Utterances(data.Dataset):
             wav_tmp = np.load(os.path.join(self.wav_dir, sbmt[2])) 
             sp_tmp = np.load(os.path.join(self.spmel_dir, sbmt[2]))
             sp_filt_tmp = np.load(os.path.join(self.spmel_filt_dir, sbmt[2]))
+            se_tmp = np.load(os.path.join(self.spenv_dir, sbmt[2]))
             f0_tmp = np.load(os.path.join(self.f0_dir, sbmt[2]))
-            uttrs[2] = ( wav_tmp, sp_tmp, sp_filt_tmp, f0_tmp )
+            uttrs[2] = ( wav_tmp, sp_tmp, sp_filt_tmp, se_tmp, f0_tmp )
             dataset[idx_offset+k] = uttrs  
         
 
@@ -66,7 +65,8 @@ class Utterances(data.Dataset):
         list_uttrs = self.dataset[index]
         spk_id_org = list_uttrs[0]
         emb_org = list_uttrs[1]
-        wav_tmp, melsp, melsp_R, f0_org = list_uttrs[2]
+        wav_tmp, melsp, melsp_filt, melse, f0_org = list_uttrs[2]
+        melsp_R = melsp_filt
         # if 'train' in self.pickle_name:
         #     wav_tmp = random_warping(wav_tmp)
         #     # wav_tmp = time_stretch(wav_tmp, robotic=True, frame=0.05, stride=0.025)
@@ -74,7 +74,7 @@ class Utterances(data.Dataset):
         #     melsp_C = get_spmel(wav_tmp).astype(np.float32)
         # else:
         #     melsp_C = melsp
-        melsp_C = melsp
+        melsp_C = np.hstack((melsp_filt, melsp))
         
         return spk_id_org, melsp, melsp_R, melsp_C, emb_org, f0_org
     
@@ -85,12 +85,12 @@ class Utterances(data.Dataset):
     
 
 
-class MyCollator(object):
-    def __init__(self, config, mode):
+class Collator(object):
+    def __init__(self, config):
         self.min_len_seq = config.min_len_seq
         self.max_len_seq = config.max_len_seq
         self.max_len_pad = config.max_len_pad
-        self.mode = mode
+        self.mode = config.mode
         
     def __call__(self, batch):
         # batch[i] is a tuple of __getitem__ outputs
@@ -98,9 +98,11 @@ class MyCollator(object):
         for token in batch:
             spk_id_org, melsp, melsp_R, melsp_C, emb_org, f0_org = token
             len_crop = np.random.randint(self.min_len_seq, self.max_len_seq+1) if self.mode == 'train' else  self.max_len_pad # 1.5s ~ 3s
-            left = np.random.randint(0, max(len(melsp)-len_crop, 1)) if self.mode == 'train' else 0
-            len_crop_warp = min(int(len_crop/len(melsp)*len(melsp_C)), self.max_len_pad)
-            left_warp = int(left/len(melsp)*len(melsp_C))
+            left = np.random.randint(0, len(melsp)-len_crop) if self.mode == 'train' else 0
+            # len_crop_warp = min(int(len_crop/len(melsp)*len(melsp_C)), self.max_len_pad)
+            # left_warp = int(left/len(melsp)*len(melsp_C))
+            len_crop_warp = len_crop
+            left_warp = left
 
             melsp = melsp[left:left+len_crop, :] # [Lc, F]
             melsp_R = melsp_R[left:left+len_crop, :] # [Lc, F]
@@ -157,35 +159,19 @@ class MultiSampler(Sampler):
     
 def get_loader(config):
     """Build and return a data loader list."""
-    rootDir = config.root_dir
-    targetDir_wav = os.path.join(rootDir, config.wav_dir)
-    targetDir_spmel = os.path.join(rootDir, config.spmel_dir)
-    targetDir_spmel_filt = os.path.join(rootDir, config.spmel_filt_dir)
-    targetDir_f0 = os.path.join(rootDir, config.f0_dir)
-    targetDir_meta = os.path.join(rootDir, config.meta_dir)
 
-    data_loader_list = []
-    pickle_list = ['train.pkl', 'val.pkl', 'test.pkl', 'train_plot.pkl', 'val_plot.pkl', 'test_plot.pkl']
-    mode_list = ['train', 'val', 'test', 'train', 'val', 'test']
-    for pickle_name, mode in zip(pickle_list, mode_list):
+    dataset = Utterances(config)
+    collator = Collator(config)
+    sampler = MultiSampler(len(dataset), config.samplier, shuffle=config.shuffle)
+    worker_init_fn = lambda x: np.random.seed((torch.initial_seed()) % (2**32))
+    
+    data_loader = data.DataLoader(dataset=dataset,
+                                 batch_size=config.batch_size,
+                                 sampler=sampler,
+                                 num_workers=config.num_workers,
+                                 drop_last=False,
+                                 pin_memory=True,
+                                 worker_init_fn=worker_init_fn,
+                                 collate_fn=collator)
 
-        dataset = Utterances(targetDir_wav, targetDir_spmel, targetDir_spmel_filt, targetDir_f0, targetDir_meta, pickle_name, config.mode)
-
-        my_collator = MyCollator(config, mode)
-        
-        sampler = MultiSampler(len(dataset), config.samplier, shuffle=config.shuffle)
-        
-        worker_init_fn = lambda x: np.random.seed((torch.initial_seed()) % (2**32))
-        
-        data_loader = data.DataLoader(dataset=dataset,
-                                    batch_size=config.batch_size if 'plot' not in pickle_name else 1,
-                                    sampler=sampler,
-                                    num_workers=config.num_workers,
-                                    drop_last=False,
-                                    pin_memory=True,
-                                    worker_init_fn=worker_init_fn,
-                                    collate_fn=my_collator)
-
-        data_loader_list.append(data_loader)
-
-    return data_loader_list
+    return data_loader

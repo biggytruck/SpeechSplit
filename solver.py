@@ -9,31 +9,23 @@ import numpy as np
 import os
 import time
 import datetime
-import pickle
-import shutil
 from collections import OrderedDict
-from utils import pad_seq_to_2, quantize_f0_torch, quantize_f0_numpy
+from utils import quantize_f0_torch
 
-# use demo data for simplicity
-# make your own validation set as needed
-# validation_pt = pickle.load(open('assets/demo.pkl', "rb"))
 
 class Solver(object):
     """Solver for training"""
 
-    def __init__(self, data_loader_list, config):
+
+    def __init__(self, data_loader, config):
         """Initialize configurations."""
 
         # Configuration
         self.config = config
 
         # Data loader.
-        self.train_loader = data_loader_list[0]
-        self.val_loader = data_loader_list[1]
-        self.test_loader = data_loader_list[2]
-        self.train_plot_loader = data_loader_list[3]
-        self.val_plot_loader = data_loader_list[4]
-        self.test_plot_loader = data_loader_list[5]
+        self.data_loader = data_loader
+        self.data_iter = iter(self.data_loader)
 
         # Training configurations.
         self.num_iters = self.config.num_iters
@@ -41,6 +33,7 @@ class Solver(object):
         self.beta1 = self.config.beta1
         self.beta2 = self.config.beta2
         self.resume_iters = self.config.resume_iters
+        self.mode = self.config.mode
         
         # Miscellaneous.
         self.experiment = self.config.experiment
@@ -54,15 +47,12 @@ class Solver(object):
         self.log_dir = os.path.join(self.config.root_dir, self.config.log_dir, self.experiment)
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
-        self.sample_dir = os.path.join(self.config.root_dir, self.config.sample_dir, self.experiment)
-        if not os.path.exists(self.sample_dir):
-            os.makedirs(self.sample_dir)
         self.model_save_dir = os.path.join(self.config.root_dir, self.config.model_save_dir, self.experiment)
         if not os.path.exists(self.model_save_dir):
             os.makedirs(self.model_save_dir)
-        self.best_model_dir = os.path.join(self.config.root_dir, self.config.best_model_dir, self.experiment)
-        if not os.path.exists(self.best_model_dir):
-            os.makedirs(self.best_model_dir)
+        self.sample_dir = os.path.join(self.config.root_dir, self.config.sample_dir, self.experiment)
+        if not os.path.exists(self.sample_dir):
+            os.makedirs(self.sample_dir)
 
         # Step size.
         self.log_step = self.config.log_step
@@ -74,8 +64,9 @@ class Solver(object):
         if self.use_tensorboard:
             self.build_tensorboard()
 
-        # logging
-        self.min_val_loss = (None, float('inf'))
+        # Logging
+        self.min_loss_step = 0
+        self.min_loss = float('inf')
 
             
     def build_model(self):        
@@ -109,7 +100,7 @@ class Solver(object):
     def restore_model(self, resume_iters):
         print('Loading the trained models from step {}...'.format(resume_iters))
         if resume_iters == -1:
-            ckpt_path = os.path.join(self.best_model_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
+            ckpt_path = os.path.join(self.model_save_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
             ckpt = torch.load(ckpt_path, map_location=lambda storage, loc: storage)
             try:
                 self.model.load_state_dict(ckpt['model'])
@@ -130,11 +121,14 @@ class Solver(object):
         """Build a tensorboard logger."""
         from torch.utils.tensorboard import SummaryWriter
         self.writer = SummaryWriter(self.log_dir)
+
+
+    def reload_data_loader(self, data_loader):
+        self.data_loader = data_loader
+        self.data_iter = iter(self.data_loader)
         
                 
     def train(self):
-        data_iter = iter(self.train_loader)
-
         # Start training from scratch or resume training.
         start_iters = 0
         if self.resume_iters:
@@ -150,7 +144,6 @@ class Solver(object):
             
         # Start training.
         print('Start training...')
-        print(len(self.train_loader))
         start_time = time.time()
         self.model = self.model.train()
         for i in range(start_iters, self.num_iters):
@@ -159,12 +152,12 @@ class Solver(object):
             #                             1. Preprocess input data                                #
             # =================================================================================== #
 
-            # Fetch real images and labels.
+            # Load data
             try:
-                _, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(data_iter)
+                _, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
             except:
-                data_iter = iter(self.train_loader)
-                _, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(data_iter)
+                self.data_iter = iter(self.data_loader)
+                _, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
             
             x_real_org = x_real_org.to(self.device)
             x_real_org_filt = x_real_org_filt.to(self.device)
@@ -172,7 +165,6 @@ class Solver(object):
             emb_org = emb_org.to(self.device)
             len_org = len_org.to(self.device)
             f0_org = f0_org.to(self.device)
-                                        
                 
             # =================================================================================== #
             #                              2. Train the generator                                 #
@@ -228,8 +220,7 @@ class Solver(object):
 
             # Plot spectrograms for training and validation data
             if (i+1) % self.sample_step == 0 and self.model_type == 'G':
-                self.plot('train', i)
-                self.plot('val', i)
+                self.plot(i+1)
                         
             # Save model checkpoints and the best one if possible
             if (i+1) % self.model_save_step == 0:
@@ -239,31 +230,37 @@ class Solver(object):
 
                 print('Saved model checkpoints into {}...'.format(self.model_save_dir))
 
-                # save the best checkpoint so far if validation loss decreases
-                val_loss = self.validate()
-                print("Iteration {}, {}/val_loss_id: {}".format(i+1, self.model_type, val_loss))
-
                 if self.use_tensorboard:
-                    self.writer.add_scalar(f'{self.model_type}/val_loss_id', val_loss, i+1)
+                    self.writer.add_scalar(f'{self.model_type}/train_loss_id', train_loss_id, i+1)
                 
-                if val_loss < self.min_val_loss[1]:
-                    self.min_val_loss = (i+1, val_loss)
-                    ckpt_path = os.path.join(self.model_save_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
-                    torch.save({'model': self.model.state_dict()}, ckpt_path)
-                    print('Best checkpoint so far: Iteration {}, Validation loss: {}'.format(self.min_val_loss[0], 
-                                                                                             self.min_val_loss[1]))
+                # current use training loss to find best model
+                # may change to validation loss for better generalization but need to do train-val split
+                if train_loss_id < self.min_loss:
+                    self.min_loss = train_loss_id
+                    self.min_loss_step = i+1
+                    # ckpt_path = os.path.join(self.model_save_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
+                    # torch.save({'model': self.model.state_dict()}, ckpt_path)
+                    print('Best checkpoint so far: Iteration {}, Training loss: {}'.format(self.min_loss_step, 
+                                                                                           self.min_loss))
+
+                # val_loss_id = self.validate()
+                # if val_loss_id < self.min_loss:
+                #     self.min_loss = val_loss_id
+                #     self.min_loss_step = i+1
+                #     ckpt_path = os.path.join(self.model_save_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
+                #     torch.save({'model': self.model.state_dict()}, ckpt_path)
+                #     print('Best checkpoint so far: Iteration {}, Training loss: {}'.format(self.min_loss, 
+                #                                                                            self.min_loss_step))
+
+        print('Best checkpoint for model {}: Iteration {}, Validation loss: {}'.format(self.model_name,
+                                                                                       self.min_loss_step, 
+                                                                                       self.min_loss))
 
         ckpt_path = os.path.join(self.model_save_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
-        shutil.copy2(ckpt_path, self.best_model_dir)
-        print('Best checkpoint for model {}: Iteration {}, Validation loss: {}'.format(self.model_name,
-                                                                                       self.min_val_loss[0], 
-                                                                                       self.min_val_loss[1]))
-
+        torch.save({'model': self.model.state_dict()}, ckpt_path)
 
 
     def test(self):
-        data_iter = iter(self.test_loader)
-
         # Start testing from scratch or resume a checkpoint.
         if self.resume_iters:
             print('Resuming ...')
@@ -272,7 +269,6 @@ class Solver(object):
 
         # Test the model
         self.model = self.model.eval()
-        print(len(self.test_loader))
         with torch.no_grad():
             test_loss_id = 0
             sample_cnt = 0
@@ -284,7 +280,7 @@ class Solver(object):
 
                 # Fetch real images and labels.
                 try:
-                    _, x_real_org, x_real_org_filt, _, emb_org, f0_org, len_org = next(data_iter)
+                    _, x_real_org, x_real_org_filt, _, emb_org, f0_org, len_org = next(self.data_iter)
                 except:
                     break
                 
@@ -331,15 +327,12 @@ class Solver(object):
             if self.use_tensorboard:
                 self.writer.add_scalar(f'{self.model_type}/test_loss_id', test_loss_id, self.resume_iters)
 
-        self.plot('test', self.resume_iters-1)
+        self.plot(self.resume_iters)
 
-    
+
     def validate(self):
-        data_iter = iter(self.val_loader)
-
         # Evaluate the model
         self.model = self.model.eval()
-        print(len(self.val_loader))
         with torch.no_grad():
             val_loss_id = 0
             sample_cnt = 0
@@ -351,7 +344,7 @@ class Solver(object):
 
                 # Fetch real images and labels.
                 try:
-                    _, x_real_org, x_real_org_filt, _, emb_org, f0_org, len_org = next(data_iter)
+                    _, x_real_org, x_real_org_filt, _, emb_org, f0_org, len_org = next(self.data_iter)
                 except:
                     break
                 
@@ -394,6 +387,9 @@ class Solver(object):
                 sample_cnt += batch_size
             
             val_loss_id /= sample_cnt
+            print("Iteration {}, {}/val_loss_id: {}".format(self.resume_iters, self.model_type, val_loss_id))
+            if self.use_tensorboard:
+                self.writer.add_scalar(f'{self.model_type}/val_loss_id', val_loss_id, self.resume_iters)
 
         # return to training mode
         self.model = self.model.train()
@@ -401,92 +397,113 @@ class Solver(object):
         return val_loss_id
 
     
-    def plot(self, mode, i):
-        # Fetch fixed inputs for debugging depending on the mode.
-        if mode == 'train':
-            data_iter = iter(self.train_plot_loader)
-        elif mode == 'val':
-            data_iter = iter(self.val_plot_loader)
-        elif mode == 'test':
-            data_iter = iter(self.test_plot_loader)
-        else:
-            raise ValueError
-
+    def plot(self, step):
         # plot samples
-
         self.model = self.model.eval()
         
         with torch.no_grad():
-            while True:
 
-                # =================================================================================== #
-                #                             1. Preprocess input data                                #
-                # =================================================================================== #
+            # =================================================================================== #
+            #                             1. Preprocess input data                                #
+            # =================================================================================== #
 
-                # Fetch real images and labels.
-                try:
-                    spk_id_org, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(data_iter)
-                except:
-                    break
+            # Load data
+            try:
+                spk_id_org, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
+            except:
+                self.data_iter = iter(self.data_loader)
+                spk_id_org, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
 
-                x_real_org = x_real_org.to(self.device)
-                x_real_org_filt = x_real_org_filt.to(self.device)
-                x_real_org_warp = x_real_org_warp.to(self.device)
-                emb_org = emb_org.to(self.device)
-                len_org = len_org.to(self.device)
-                f0_org = f0_org.to(self.device)
-                
+            x_real_org = x_real_org.to(self.device)
+            x_real_org_filt = x_real_org_filt.to(self.device)
+            x_real_org_warp = x_real_org_warp.to(self.device)
+            emb_org = emb_org.to(self.device)
+            len_org = len_org.to(self.device)
+            f0_org = f0_org.to(self.device)
+            
+            # =================================================================================== #
+            #                             2. Evaluate the generator                               #
+            # =================================================================================== #
                         
-                # =================================================================================== #
-                #                             2. Evaluate the generator                               #
-                # =================================================================================== #
-                            
-                # Identity mapping loss
-                f0_org_one_hot = quantize_f0_torch(f0_org)[0] # [B, T, 257]
-                x_f0 = torch.cat((x_real_org, f0_org_one_hot), dim=-1) # [B, T, F+257]
-                x_f0_woF = torch.cat((x_real_org, torch.zeros_like(f0_org_one_hot)), dim=-1) # [B, T, F+257]
-                x_f0_woC = torch.cat((torch.zeros_like(x_real_org), f0_org_one_hot), dim=-1) # [B, T, F+257]
+            # Identity mapping loss
+            f0_org_one_hot = quantize_f0_torch(f0_org)[0] # [B, T, 257]
+            x_f0 = torch.cat((x_real_org, f0_org_one_hot), dim=-1) # [B, T, F+257]
+            x_f0_woF = torch.cat((x_real_org, torch.zeros_like(f0_org_one_hot)), dim=-1) # [B, T, F+257]
+            x_f0_woC = torch.cat((torch.zeros_like(x_real_org), f0_org_one_hot), dim=-1) # [B, T, F+257]
+            x_f0_woCF = torch.zeros_like(x_f0) # [B, T, F+257]
 
-                if self.experiment == 'spsp1':
-                    x_identic = self.model(x_f0, x_real_org, emb_org, rr=False)
-                    x_identic_woF = self.model(x_f0_woF, x_real_org, emb_org, rr=False)
-                    x_identic_woR = self.model(x_f0, torch.zeros_like(x_real_org), emb_org, rr=False)
-                    x_identic_woC = self.model(x_f0_woC, x_real_org, emb_org, rr=False)
-                    x_identic_woT = self.model(x_f0, x_real_org, torch.zeros_like(emb_org), rr=False)
-                elif self.experiment == 'spsp2':
-                    x_identic = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
-                    x_identic_woF = self.model(x_f0_woF, x_real_org_filt, emb_org, rr=False)
-                    x_identic_woR = self.model(x_f0, torch.zeros_like(x_real_org_filt), emb_org, rr=False)
-                    x_identic_woC = self.model(x_f0_woC, x_real_org_filt, emb_org, rr=False)
-                    x_identic_woT = self.model(x_f0, x_real_org_filt, torch.zeros_like(emb_org), rr=False)
-                else:
-                    raise ValueError
+            if self.experiment == 'spsp1':
+                x_identic = self.model(x_f0, x_real_org, emb_org, rr=False)
+                x_identic_woF = self.model(x_f0_woF, x_real_org, emb_org, rr=False)
+                x_identic_woR = self.model(x_f0, torch.zeros_like(x_real_org), emb_org, rr=False)
+                x_identic_woC = self.model(x_f0_woC, x_real_org, emb_org, rr=False)
+                x_identic_woT = self.model(x_f0, x_real_org, torch.zeros_like(emb_org), rr=False)
+                x_identic_woCF = self.model(x_f0_woCF, x_real_org, emb_org, rr=False)
+            elif self.experiment == 'spsp2':
+                x_identic = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
+                x_identic_woF = self.model(x_f0_woF, x_real_org_filt, emb_org, rr=False)
+                x_identic_woR = self.model(x_f0, torch.zeros_like(x_real_org_filt), emb_org, rr=False)
+                x_identic_woC = self.model(x_f0_woC, x_real_org_filt, emb_org, rr=False)
+                x_identic_woT = self.model(x_f0, x_real_org_filt, torch.zeros_like(emb_org), rr=False)
+                x_identic_woCF = self.model(x_f0_woCF, x_real_org_filt, emb_org, rr=False)
+            else:
+                raise ValueError
 
-                # plot output
-                melsp_gd_pad = x_real_org[0].cpu().numpy().T
-                melsp_out = x_identic[0].cpu().numpy().T
-                melsp_woF = x_identic_woF[0].cpu().numpy().T
-                melsp_woR = x_identic_woR[0].cpu().numpy().T
-                melsp_woC = x_identic_woC[0].cpu().numpy().T
-                melsp_woT = x_identic_woT[0].cpu().numpy().T
+            # plot input
+            x_f0 = x_f0[0].cpu().numpy().T
+            x_f0_woF = x_f0_woF[0].cpu().numpy().T
+            x_f0_woC = x_f0_woC[0].cpu().numpy().T
+            x_f0_woCF = x_f0_woCF[0].cpu().numpy().T
+            x_real_org_orig = x_real_org[0].cpu().numpy().T
+            x_real_org_filt = x_real_org_filt[0].cpu().numpy().T
 
-                min_value = np.min(np.hstack([melsp_gd_pad, melsp_out, melsp_woF, melsp_woR, melsp_woC, melsp_woT]))
-                max_value = np.max(np.hstack([melsp_gd_pad, melsp_out, melsp_woF, melsp_woR, melsp_woC, melsp_woT]))
-                
-                fig, (ax1,ax2,ax3,ax4,ax5,ax6) = plt.subplots(6, 1, sharex=True, figsize=(12, 10))
-                ax1.set_title('Original Mel-Spectrogram', fontsize=10)
-                ax2.set_title('Output Mel-Spectrogram', fontsize=10)
-                ax3.set_title('Output Mel-Spectrogram Without Content', fontsize=10)
-                ax4.set_title('Output Mel-Spectrogram Without Rhythm', fontsize=10)
-                ax5.set_title('Output Mel-Spectrogram Without Pitch', fontsize=10)
-                ax6.set_title('Output Mel-Spectrogram Without Timbre', fontsize=10)
-                _ = ax1.imshow(melsp_gd_pad, aspect='auto', vmin=min_value, vmax=max_value)
-                _ = ax2.imshow(melsp_out, aspect='auto', vmin=min_value, vmax=max_value)
-                _ = ax3.imshow(melsp_woC, aspect='auto', vmin=min_value, vmax=max_value)
-                _ = ax4.imshow(melsp_woR, aspect='auto', vmin=min_value, vmax=max_value)
-                _ = ax5.imshow(melsp_woF, aspect='auto', vmin=min_value, vmax=max_value)
-                _ = ax6.imshow(melsp_woT, aspect='auto', vmin=min_value, vmax=max_value)
-                plt.savefig(f'{self.sample_dir}/{self.model_name}_{mode}_output_{spk_id_org[0]}_{i+1}.png', dpi=150)
-                plt.close(fig)
+            min_value = np.min(np.vstack([x_f0, x_f0_woF, x_f0_woC, x_f0_woCF, x_real_org_orig, x_real_org_filt]))
+            max_value = np.max(np.vstack([x_f0, x_f0_woF, x_f0_woC, x_f0_woCF, x_real_org_orig, x_real_org_filt]))
+            
+            fig, (ax1,ax2,ax3,ax4,ax5,ax6) = plt.subplots(6, 1, sharex=True, figsize=(12, 10))
+            ax1.set_title('x_f0', fontsize=10)
+            ax2.set_title('x_f0_woF', fontsize=10)
+            ax3.set_title('x_f0_woC', fontsize=10)
+            ax4.set_title('x_f0_woCF', fontsize=10)
+            ax5.set_title('x_real_org_orig', fontsize=10)
+            ax6.set_title('x_real_org_filt', fontsize=10)
+            _ = ax1.imshow(x_f0, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax2.imshow(x_f0_woF, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax3.imshow(x_f0_woC, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax4.imshow(x_f0_woCF, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax5.imshow(x_real_org_orig, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax6.imshow(x_real_org_filt, aspect='auto', vmin=min_value, vmax=max_value)
+            plt.savefig(f'{self.sample_dir}/{self.model_name}_{self.mode}_input_{spk_id_org[0]}_{step}.png', dpi=150)
+            plt.close(fig)
+
+            # plot output
+            melsp_gd_pad = x_real_org[0].cpu().numpy().T
+            melsp_out = x_identic[0].cpu().numpy().T
+            melsp_woF = x_identic_woF[0].cpu().numpy().T
+            melsp_woR = x_identic_woR[0].cpu().numpy().T
+            melsp_woC = x_identic_woC[0].cpu().numpy().T
+            melsp_woT = x_identic_woT[0].cpu().numpy().T
+            melsp_woCF = x_identic_woCF[0].cpu().numpy().T
+
+            min_value = np.min(np.hstack([melsp_gd_pad, melsp_out, melsp_woF, melsp_woR, melsp_woC, melsp_woT, melsp_woCF]))
+            max_value = np.max(np.hstack([melsp_gd_pad, melsp_out, melsp_woF, melsp_woR, melsp_woC, melsp_woT, melsp_woCF]))
+            
+            fig, (ax1,ax2,ax3,ax4,ax5,ax6,ax7) = plt.subplots(7, 1, sharex=True, figsize=(14, 10))
+            ax1.set_title('Original Mel-Spectrogram', fontsize=10)
+            ax2.set_title('Output Mel-Spectrogram', fontsize=10)
+            ax3.set_title('Output Mel-Spectrogram Without Content', fontsize=10)
+            ax4.set_title('Output Mel-Spectrogram Without Rhythm', fontsize=10)
+            ax5.set_title('Output Mel-Spectrogram Without Pitch', fontsize=10)
+            ax6.set_title('Output Mel-Spectrogram Without Timbre', fontsize=10)
+            ax7.set_title('Output Mel-Spectrogram Without Content And Pitch', fontsize=10)
+            _ = ax1.imshow(melsp_gd_pad, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax2.imshow(melsp_out, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax3.imshow(melsp_woC, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax4.imshow(melsp_woR, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax5.imshow(melsp_woF, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax6.imshow(melsp_woT, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax7.imshow(melsp_woCF, aspect='auto', vmin=min_value, vmax=max_value)
+            plt.savefig(f'{self.sample_dir}/{self.model_name}_{self.mode}_output_{spk_id_org[0]}_{step}.png', dpi=150)
+            plt.close(fig)
 
         self.model = self.model.train()

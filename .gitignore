@@ -142,12 +142,18 @@ assets/
 results/
 run/
 eval/
+train/
+test/
+sylnet_models/
+result/
+plot/
+plot_tmp/
+*log.txt
+spk2gen.pkl
 
 # script
 script.py
 
 model_diagram
-
-eval/
 
 metrics.json

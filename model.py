@@ -1,10 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-
-from math import ceil 
-from utils import get_mask_from_lengths
 
 
 class LinearNorm(torch.nn.Module):
@@ -51,7 +47,7 @@ class Encoder_t(nn.Module):
 
         self.dim_neck_2 = config.dim_neck_2
         self.freq_2 = config.freq_2
-        self.dim_freq = config.dim_freq
+        self.dim_freq = config.dim_freq if config.experiment == 'spsp1' else 1
         self.dim_enc_2 = config.dim_enc_2
         self.dim_emb = config.dim_spk_emb
         self.chs_grp = config.chs_grp
@@ -153,7 +149,7 @@ class Encoder_7(nn.Module):
         self.freq_3 = config.freq_3
         self.dim_enc = config.dim_enc
         self.dim_enc_3 = config.dim_enc_3
-        self.dim_freq = config.dim_freq
+        self.dim_freq = config.dim_freq if config.experiment == 'spsp1' else config.dim_freq+1
         self.chs_grp = config.chs_grp
         self.register_buffer('len_org', torch.tensor(config.max_len_pad))
         self.dim_neck_3 = config.dim_neck_3

@@ -1,5 +1,4 @@
 import os
-import torch
 from torch.backends import cudnn
 
 from solver import Solver
@@ -31,26 +30,26 @@ def main(config):
     if config.run_model:
 
         # Data loader.
-        data_loader_list = get_loader(config)
+        data_loader = get_loader(config)
 
         # Experiments
         experiments = [
-            'spsp1',
+            # 'spsp1',
             'spsp2'
         ]
         
         # Bottleneck size settings
         settings = {
-                    'R_8_1': [8,8,8,8,1,32],
-                    'R_1_1': [8,1,8,8,1,32],
-                    'R_8_32': [8,8,8,8,32,32],
+                    # 'R_8_1': [8,8,8,8,1,32],
+                    # 'R_1_1': [8,1,8,8,1,32],
+                    # 'R_8_32': [8,8,8,8,32,32],
                     'R_1_32': [8,1,8,8,32,32],
         }
 
         # G or F
         model_types = [
             'G',
-            'F'
+            # 'F'
         ]
 
 
@@ -69,7 +68,7 @@ def main(config):
                     config.model_type = model_type
 
                     # Solver for training
-                    solver = Solver(data_loader_list, config)
+                    solver = Solver(data_loader, config)
 
                     if config.mode == 'train':
                         solver.train()

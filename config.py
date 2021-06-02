@@ -9,13 +9,19 @@ def get_config():
 
     # Directories
     parser.add_argument('--root_dir', type=str, default='./')
-    parser.add_argument('--src_dir', type=str, default='assets/wavs')
-    parser.add_argument('--wav_dir', type=str, default='assets/filt_wav')
-    parser.add_argument('--spmel_dir', type=str, default='assets/spmel')
-    parser.add_argument('--spmel_filt_dir', type=str, default='assets/spmel_filt')
-    parser.add_argument('--f0_dir', type=str, default='assets/raptf0')
-    parser.add_argument('--txt_dir', type=str, default='assets/txt')
-    parser.add_argument('--meta_dir', type=str, default='assets/meta')
+    parser.add_argument('--src_dir', type=str, default='src')
+    parser.add_argument('--wav_dir', type=str, default='wav')
+    parser.add_argument('--spmel_dir', type=str, default='spmel')
+    parser.add_argument('--spmel_filt_dir', type=str, default='spmel_filt')
+    parser.add_argument('--spenv_dir', type=str, default='spenv')
+    parser.add_argument('--f0_dir', type=str, default='f0')
+    parser.add_argument('--txt_dir', type=str, default='txt')
+    parser.add_argument('--result_dir', type=str, default='result')
+    parser.add_argument('--plot_dir', type=str, default='plot')
+    parser.add_argument('--log_dir', type=str, default='run/logs/')
+    parser.add_argument('--model_save_dir', type=str, default='run/models/')
+    parser.add_argument('--sample_dir', type=str, default='run/samples/')
+    parser.add_argument('--experiment', type=str, default='spsp2')
 
     # Data Preprocessing
     parser.add_argument('--make_metadata', type=str2bool, default=False)
@@ -52,7 +58,7 @@ def get_config():
     parser.add_argument('--max_len_pad', type=int, default=192)
 
     # Training configuration.
-    parser.add_argument('--num_iters', type=int, default=500000, help='number of total iterations')
+    parser.add_argument('--num_iters', type=int, default=800000, help='number of total iterations')
     parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
     parser.add_argument('--beta1', type=float, default=0.9, help='beta1 for Adam optimizer')
     parser.add_argument('--beta2', type=float, default=0.999, help='beta2 for Adam optimizer')
@@ -64,17 +70,10 @@ def get_config():
     parser.add_argument('--use_tensorboard', type=str2bool, default=False)
     parser.add_argument('--device_id', type=int, default=0)
 
-    # Directories.
-    parser.add_argument('--log_dir', type=str, default='run/logs/')
-    parser.add_argument('--model_save_dir', type=str, default='run/models/')
-    parser.add_argument('--best_model_dir', type=str, default='eval/models/')
-    parser.add_argument('--sample_dir', type=str, default='run/samples/')
-    parser.add_argument('--experiment', type=str, default='spsp2')
-
     # Step size.
-    parser.add_argument('--log_step', type=int, default=10)
-    parser.add_argument('--sample_step', type=int, default=50000)
-    parser.add_argument('--model_save_step', type=int, default=50000)
+    parser.add_argument('--log_step', type=int, default=100)
+    parser.add_argument('--sample_step', type=int, default=20000)
+    parser.add_argument('--model_save_step', type=int, default=20000)
 
     config = parser.parse_args()
 

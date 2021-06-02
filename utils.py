@@ -12,6 +12,7 @@ from librosa.filters import mel
 from librosa.core import resample
 from librosa.util import fix_length
 from scipy.signal import get_window, filtfilt, medfilt2d
+from acoustics.cepstrum import real_cepstrum
 from math import pi, sqrt, exp
 
 
@@ -28,10 +29,17 @@ def butter_highpass(cutoff, fs, order=5):
     normal_cutoff = cutoff / nyq
     b, a = signal.butter(order, normal_cutoff, btype='high', analog=False)
     return b, a
+
+
+def butter_lowpass(cutoff, fs, order=5):
+    nyq = 0.5 * fs
+    normal_cutoff = cutoff / nyq
+    b, a = signal.butter(order, normal_cutoff, btype='low', analog=False)
+    return b, a
     
     
-def pySTFT(x, fft_length=1024, hop_length=256):
-    
+def stride_wav(x, fft_length=1024, hop_length=256):
+
     x = np.pad(x, int(fft_length//2), mode='reflect')
     
     noverlap = fft_length - hop_length
@@ -39,6 +47,13 @@ def pySTFT(x, fft_length=1024, hop_length=256):
     strides = x.strides[:-1]+(hop_length*x.strides[-1], x.strides[-1])
     result = np.lib.stride_tricks.as_strided(x, shape=shape,
                                              strides=strides)
+
+    return result
+
+
+def pySTFT(x, fft_length=1024, hop_length=256):
+    
+    result = stride_wav(x, fft_length=fft_length, hop_length=hop_length)
     
     fft_window = get_window('hann', fft_length, fftbins=True)
     result = np.fft.rfft(fft_window * result, n=fft_length).T
@@ -60,6 +75,7 @@ def speaker_normalization(f0, index_nonzero, mean_f0, std_f0):
 
 def inverse_quantize_f0_numpy(x, num_bins=257):
     assert x.ndim==2
+    assert x.shape[1]==num_bins
     y = np.argmax(x, axis=1).astype(float)
     y /= (num_bins-1)
     return y
@@ -113,8 +129,6 @@ def pad_seq_to_2(x, len_out=128):
 
 b, a = butter_highpass(30, 16000, order=5)
 def filter_wav(x, prng):
-    if x.shape[0] % 256 == 0:
-        x = np.concatenate((x, np.array([1e-06])), axis=0)
     y = signal.filtfilt(b, a, x)
     wav = y * 0.96 + (prng.rand(y.shape[0])-0.5)*1e-06
     return wav
@@ -127,6 +141,23 @@ def get_spmel(wav):
     D_db = 20 * np.log10(np.maximum(min_level, D_mel)) - 16
     S = (D_db + 100) / 100       
     return S
+
+
+def get_spenv(wav, cutoff=5):
+    D = pySTFT(wav).T
+    ceps = np.fft.irfft(np.log(D), axis=-1).real # [T, F]
+    F = ceps.shape[1]
+    lifter = np.zeros(F)
+    lifter[:cutoff] = 1
+    lifter[cutoff] = 0.5
+    lifter = np.diag(lifter)
+    env = np.matmul(ceps, lifter)
+    env = np.abs(np.exp(np.fft.rfft(env, axis=-1)))
+    env = 20 * np.log10(np.maximum(min_level, env)) - 16
+    env = (env + 100) / 100
+    env = zero_one_norm(env)
+    env = signal.resample(env, 80, axis=-1)
+    return env
 
 
 
@@ -279,6 +310,15 @@ def smooth_spmel(S, n_mels=80):
     return S_smooth
 
 
+def get_spmel_filt(spmel):
+    spmel_filt = smooth_spmel(spmel)
+    spmel_filt = make_filt_spect(spmel_filt)
+    spmel_filt = np.abs(spmel_filt)
+    spmel_filt = zero_one_norm(spmel_filt)
+    spmel_filt = spmel_filt[:, :1]
+    return spmel_filt
+
+
 def get_common_wav_ids(txt_dir):
     pairs = OrderedDict()
     dirName, subdirList, _ = next(os.walk(txt_dir))
@@ -308,7 +348,6 @@ def get_test_data_set(turk_list_fname = 'turk_list.txt', spk_list_fname = 'spk_l
             speaker, i = line.strip().split(' ')
             spk2id[speaker] = int(i)
 
-    test_data = set()
     test_data_by_ctype = dict()
     curr_key = ''
     with open(turk_list_fname, 'r') as f:
@@ -330,11 +369,5 @@ def get_test_data_set(turk_list_fname = 'turk_list.txt', spk_list_fname = 'spk_l
                         (tgt_dir+'/'+tgt_name, spk2id[tgt_dir]))
                 if not test_data_by_ctype[curr_key] or item != test_data_by_ctype[curr_key][-1]:
                     test_data_by_ctype[curr_key].append(item)
-                src_path1 = src_dir+'/'+'_'.join([src_dir, src_wav_id[:3], 'mic1.npy'])
-                src_path2 = src_dir+'/'+'_'.join([src_dir, src_wav_id[:3], 'mic2.npy'])
-                tgt_path1 = tgt_dir+'/'+'_'.join([tgt_dir, tgt_wav_id[:3], 'mic1.npy'])
-                tgt_path2 = tgt_dir+'/'+'_'.join([tgt_dir, tgt_wav_id[:3], 'mic2.npy'])
-                for path in [src_path1, tgt_path1, src_path2, tgt_path2]:
-                    test_data.add(path)
 
-    return test_data, test_data_by_ctype
+    return test_data_by_ctype
