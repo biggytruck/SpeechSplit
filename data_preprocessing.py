@@ -94,7 +94,7 @@ def make_metadata(config):
 
     dataset = []
 
-    with open(config.mode+'/spk_list.txt', 'r') as f:
+    with open(os.path.join(root_dir, 'spk_list.txt'), 'r') as f:
         for line in f:
             spk, spk_id = line.strip().split(' ')
             print('Processing speaker: %s; Speaker ID: %s' %(spk, spk_id))
