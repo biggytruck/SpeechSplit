@@ -8,6 +8,8 @@ from multiprocessing import Process, Manager
 from torch.utils import data
 from torch.utils.data.sampler import Sampler
 
+import torch.multiprocessing
+torch.multiprocessing.set_sharing_strategy('file_system')
 # from utils import get_spmel, random_warping, time_stretch
 
 
@@ -23,7 +25,7 @@ class Utterances(data.Dataset):
         self.spenv_dir = os.path.join(self.root_dir, config.spenv_dir)
         self.f0_dir = os.path.join(self.root_dir, config.f0_dir)
         self.mode = config.mode
-        self.step = 5
+        self.step = 300
         print('Currently processing {} dataset'.format(config.mode))
 
         metaname = os.path.join(self.root_dir, 'dataset.pkl')
