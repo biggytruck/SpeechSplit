@@ -426,13 +426,14 @@ class Solver(object):
             # =================================================================================== #
                         
             # Identity mapping loss
-            f0_org_one_hot = quantize_f0_torch(f0_org)[0] # [B, T, 257]
-            x_f0 = torch.cat((x_real_org, f0_org_one_hot), dim=-1) # [B, T, F+257]
-            x_f0_woF = torch.cat((x_real_org, torch.zeros_like(f0_org_one_hot)), dim=-1) # [B, T, F+257]
-            x_f0_woC = torch.cat((torch.zeros_like(x_real_org), f0_org_one_hot), dim=-1) # [B, T, F+257]
-            x_f0_woCF = torch.zeros_like(x_f0) # [B, T, F+257]
-
             if self.experiment == 'spsp1':
+
+                f0_org_one_hot = quantize_f0_torch(f0_org)[0] # [B, T, 257]
+                x_f0 = torch.cat((x_real_org, f0_org_one_hot), dim=-1) # [B, T, F+257]
+                x_f0_woF = torch.cat((x_real_org, torch.zeros_like(f0_org_one_hot)), dim=-1) # [B, T, F+257]
+                x_f0_woC = torch.cat((torch.zeros_like(x_real_org), f0_org_one_hot), dim=-1) # [B, T, F+257]
+                x_f0_woCF = torch.zeros_like(x_f0) # [B, T, F+257]
+            
                 x_identic = self.model(x_f0, x_real_org, emb_org, rr=False)
                 x_identic_woF = self.model(x_f0_woF, x_real_org, emb_org, rr=False)
                 x_identic_woR = self.model(x_f0, torch.zeros_like(x_real_org), emb_org, rr=False)
@@ -440,6 +441,12 @@ class Solver(object):
                 x_identic_woT = self.model(x_f0, x_real_org, torch.zeros_like(emb_org), rr=False)
                 x_identic_woCF = self.model(x_f0_woCF, x_real_org, emb_org, rr=False)
             elif self.experiment == 'spsp2':
+                f0_org_one_hot = quantize_f0_torch(f0_org)[0] # [B, T, 257]
+                x_f0 = torch.cat((x_real_org_warp, f0_org_one_hot), dim=-1) # [B, T, F+1+257]
+                x_f0_woF = torch.cat((x_real_org_warp, torch.zeros_like(f0_org_one_hot)), dim=-1) # [B, T, F+1+257]
+                x_f0_woC = torch.cat((torch.zeros_like(x_real_org_warp), f0_org_one_hot), dim=-1) # [B, T, F+1+257]
+                x_f0_woCF = torch.zeros_like(x_f0) # [B, T, F+1+257]
+
                 x_identic = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
                 x_identic_woF = self.model(x_f0_woF, x_real_org_filt, emb_org, rr=False)
                 x_identic_woR = self.model(x_f0, torch.zeros_like(x_real_org_filt), emb_org, rr=False)
