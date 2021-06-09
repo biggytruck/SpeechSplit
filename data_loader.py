@@ -8,8 +8,6 @@ from multiprocessing import Process, Manager
 from torch.utils import data
 from torch.utils.data.sampler import Sampler
 
-import torch.multiprocessing
-torch.multiprocessing.set_sharing_strategy('file_system')
 # from utils import get_spmel, random_warping, time_stretch
 
 
@@ -25,7 +23,7 @@ class Utterances(data.Dataset):
         self.spenv_dir = os.path.join(self.root_dir, config.spenv_dir)
         self.f0_dir = os.path.join(self.root_dir, config.f0_dir)
         self.mode = config.mode
-        self.step = 300
+        self.step = 300 if config.on_server else 5
         print('Currently processing {} dataset'.format(config.mode))
 
         metaname = os.path.join(self.root_dir, 'dataset.pkl')
@@ -68,7 +66,7 @@ class Utterances(data.Dataset):
         spk_id_org = list_uttrs[0]
         emb_org = list_uttrs[1]
         wav_tmp, melsp, melsp_filt, melse, f0_org = list_uttrs[2]
-        melsp_R = melsp_filt
+        melsp_R = np.hstack((melsp_filt, melse))
         # if 'train' in self.pickle_name:
         #     wav_tmp = random_warping(wav_tmp)
         #     # wav_tmp = time_stretch(wav_tmp, robotic=True, frame=0.05, stride=0.025)
@@ -162,6 +160,8 @@ class MultiSampler(Sampler):
 def get_loader(config):
     """Build and return a data loader list."""
 
+    if config.on_server:
+        torch.multiprocessing.set_sharing_strategy('file_system')
     dataset = Utterances(config)
     collator = Collator(config)
     sampler = MultiSampler(len(dataset), config.samplier, shuffle=config.shuffle)

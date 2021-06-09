@@ -104,15 +104,21 @@ class Solver(object):
             ckpt = torch.load(ckpt_path, map_location=lambda storage, loc: storage)
             try:
                 self.model.load_state_dict(ckpt['model'])
-            except RuntimeError:
-                self.model.module.load_state_dict(ckpt['model'])
+            except:
+                new_state_dict = OrderedDict()
+                for k, v in ckpt['model'].items():
+                    new_state_dict[k[7:]] = v
+                self.model.load_state_dict(new_state_dict)
         else:
             ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}.ckpt'.format(self.model_name, self.model_type, resume_iters))
             ckpt = torch.load(ckpt_path, map_location=lambda storage, loc: storage)
             try:
                 self.model.load_state_dict(ckpt['model'])
-            except RuntimeError:
-                self.model.module.load_state_dict(ckpt['model'])
+            except:
+                new_state_dict = OrderedDict()
+                for k, v in ckpt['model'].items():
+                    new_state_dict[k[7:]] = v
+                self.model.load_state_dict(new_state_dict)
             self.optimizer.load_state_dict(ckpt['optimizer'])
             self.lr = self.optimizer.param_groups[0]['lr']
         

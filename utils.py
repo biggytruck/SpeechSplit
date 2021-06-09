@@ -143,7 +143,7 @@ def get_spmel(wav):
     return S
 
 
-def get_spenv(wav, cutoff=5):
+def get_spenv(wav, cutoff=3):
     D = pySTFT(wav).T
     ceps = np.fft.irfft(np.log(D), axis=-1).real # [T, F]
     F = ceps.shape[1]

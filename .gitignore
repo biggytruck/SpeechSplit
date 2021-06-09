@@ -149,6 +149,7 @@ result/
 plot/
 plot_tmp/
 *log.txt
+bad_results.txt
 
 # script
 script.py

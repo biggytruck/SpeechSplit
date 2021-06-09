@@ -47,7 +47,7 @@ class Encoder_t(nn.Module):
 
         self.dim_neck_2 = config.dim_neck_2
         self.freq_2 = config.freq_2
-        self.dim_freq = config.dim_freq if config.experiment == 'spsp1' else 1
+        self.dim_freq = config.dim_freq if config.experiment == 'spsp1' else config.dim_freq+1
         self.dim_enc_2 = config.dim_enc_2
         self.dim_emb = config.dim_spk_emb
         self.chs_grp = config.chs_grp
