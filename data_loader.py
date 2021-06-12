@@ -23,7 +23,8 @@ class Utterances(data.Dataset):
         self.spenv_dir = os.path.join(self.root_dir, config.spenv_dir+str(config.cutoff))
         self.f0_dir = os.path.join(self.root_dir, config.f0_dir)
         self.mode = config.mode
-        self.step = 300 if config.on_server else 5
+        # self.step = 300 if config.on_server else 5
+        self.step = 5
         print('Currently processing {} dataset'.format(config.mode))
 
         metaname = os.path.join(self.root_dir, 'dataset.pkl')
