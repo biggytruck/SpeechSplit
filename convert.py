@@ -166,7 +166,7 @@ if __name__ == '__main__':
     src_dir = os.path.join(root_dir, config.mode, config.src_dir)
     spmel_dir = os.path.join(root_dir, config.mode, config.spmel_dir)
     spmel_filt_dir = os.path.join(root_dir, config.mode, config.spmel_filt_dir)
-    spenv_dir = os.path.join(root_dir, config.mode, config.spenv_dir)
+    spenv_dir = os.path.join(root_dir, config.mode, config.spenv_dir+str(config.cutoff))
     f0_dir = os.path.join(root_dir, config.mode, config.f0_dir)
 
     model_save_dir = os.path.join(root_dir, config.model_save_dir)

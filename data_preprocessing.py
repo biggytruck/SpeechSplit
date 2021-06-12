@@ -8,12 +8,13 @@ from sklearn.model_selection import train_test_split
 from utils import *
 
 def make_spect_f0(config):
+    cutoff = config.cutoff
     root_dir = os.path.join(config.root_dir, config.mode)
     src_dir = os.path.join(root_dir, config.src_dir)
     wav_dir = os.path.join(root_dir, config.wav_dir)
     spmel_dir = os.path.join(root_dir, config.spmel_dir)
     spmel_filt_dir = os.path.join(root_dir, config.spmel_filt_dir)
-    spenv_dir = os.path.join(root_dir, config.spenv_dir)
+    spenv_dir = os.path.join(root_dir, config.spenv_dir+str(cutoff))
     f0_dir = os.path.join(root_dir, config.f0_dir)
     spk2gen = pickle.load(open('spk2gen.pkl', "rb"))
 
@@ -62,7 +63,7 @@ def make_spect_f0(config):
             spmel_filt = get_spmel_filt(spmel)
 
             # get spectral envelope
-            spenv = get_spenv(wav)
+            spenv = get_spenv(wav, cutoff)
             
             # extract f0
             f0_rapt, f0_norm = extract_f0(wav, fs, lo, hi)

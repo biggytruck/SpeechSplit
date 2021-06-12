@@ -20,7 +20,7 @@ class Utterances(data.Dataset):
         self.wav_dir = os.path.join(self.root_dir, config.wav_dir)
         self.spmel_dir = os.path.join(self.root_dir, config.spmel_dir)
         self.spmel_filt_dir = os.path.join(self.root_dir, config.spmel_filt_dir)
-        self.spenv_dir = os.path.join(self.root_dir, config.spenv_dir)
+        self.spenv_dir = os.path.join(self.root_dir, config.spenv_dir+str(config.cutoff))
         self.f0_dir = os.path.join(self.root_dir, config.f0_dir)
         self.mode = config.mode
         self.step = 300 if config.on_server else 5
@@ -43,7 +43,9 @@ class Utterances(data.Dataset):
             p.join()
 
         self.dataset = list(dataset)
-        self.num_tokens = len(self.dataset)
+        self.data_size = len(self.dataset)
+        # self.num_tokens = len(self.dataset)
+        self.num_tokens = 10000
 
     def load_data(self, submeta, dataset, idx_offset):  
         for k, sbmt in enumerate(submeta):    
@@ -62,7 +64,7 @@ class Utterances(data.Dataset):
         
 
     def __getitem__(self, index):
-        list_uttrs = self.dataset[index]
+        list_uttrs = self.dataset[index % self.data_size]
         spk_id_org = list_uttrs[0]
         emb_org = list_uttrs[1]
         wav_tmp, melsp, melsp_filt, melse, f0_org = list_uttrs[2]

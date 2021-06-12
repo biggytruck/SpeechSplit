@@ -1,6 +1,6 @@
 from model import Generator_3 as Generator
 from model import Generator_6 as F_Converter
-from model import InterpLnr
+from model import InterpLnr, STLR
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
@@ -80,6 +80,8 @@ class Solver(object):
         self.Interp = InterpLnr(self.config)
         self.optimizer = torch.optim.Adam(self.model.parameters(), self.lr, [self.beta1, self.beta2])
         self.Interp.to(self.device)
+
+        self.scheduler = STLR(self.optimizer, num_iters=self.num_iters, cut_frac=0.1, ratio=32)
 
         
     def print_network(self, model, name):
@@ -206,6 +208,7 @@ class Solver(object):
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+            self.scheduler.step()
 
             # Logging.
             train_loss_id = loss_id.item()

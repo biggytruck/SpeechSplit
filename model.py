@@ -470,4 +470,25 @@ class D_VECTOR(nn.Module):
         norm = embeds.norm(p=2, dim=-1, keepdim=True) 
         embeds_normalized = embeds.div(norm)
         return embeds_normalized
-  
+
+
+class STLR(torch.optim.lr_scheduler._LRScheduler):
+    def __init__(self, optimizer, num_iters, cut_frac, ratio, last_epoch=-1):
+        super(STLR, self).__init__(optimizer, last_epoch=last_epoch)
+        self.optimizer = optimizer
+        self.cut_frac = cut_frac
+        self.cut = int(num_iters * cut_frac)
+        self.ratio = ratio
+
+    def get_lr(self):
+        if self.last_epoch <= 0:
+            return self.base_lrs
+        else:
+            if self.last_epoch < self.cut:
+                p = self.last_epoch / self.cut
+            else:
+                p = 1 - (self.last_epoch - self.cut) / (self.cut * (1/self.cut_frac - 1))
+            
+            return [(1 + p * (self.ratio - 1)) / self.ratio * lr for lr in self.base_lrs]
+
+        

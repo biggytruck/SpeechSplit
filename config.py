@@ -27,6 +27,7 @@ def get_config():
     parser.add_argument('--make_metadata', type=str2bool, default=False)
     parser.add_argument('--make_spect_f0', type=str2bool, default=False)
     parser.add_argument('--run_model', type=str2bool, default=True)
+    parser.add_argument('--cutoff', type=int, default=3)
 
     # Dataloader
     parser.add_argument('--batch_size', type=int, default=16)
@@ -59,7 +60,7 @@ def get_config():
 
     # Training configuration.
     parser.add_argument('--num_iters', type=int, default=800000, help='number of total iterations')
-    parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
+    parser.add_argument('--lr', type=float, default=5e-4, help='learning rate')
     parser.add_argument('--beta1', type=float, default=0.9, help='beta1 for Adam optimizer')
     parser.add_argument('--beta2', type=float, default=0.999, help='beta2 for Adam optimizer')
     parser.add_argument('--resume_iters', type=int, default=None, help='resume training from this step')
