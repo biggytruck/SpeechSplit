@@ -211,9 +211,10 @@ if __name__ == '__main__':
                 config.dim_neck = params[3]
                 config.dim_neck_2 = params[4]
                 config.dim_neck_3 = params[5]
+                cutoff = config.cutoff
             
                 G = Generator(config).eval().to(device)
-                ckpt = torch.load(os.path.join(model_save_dir, model_type, model_name+'-G-'+'best.ckpt'))
+                ckpt = torch.load(os.path.join(model_save_dir, model_type, model_name+'-G-'+cutoff+'best.ckpt'))
                 try:
                     G.load_state_dict(ckpt['model'])
                 except:
@@ -223,7 +224,7 @@ if __name__ == '__main__':
                     G.load_state_dict(new_state_dict)
 
                 F = F0_Converter(config).eval().to(device)
-                ckpt = torch.load(os.path.join(model_save_dir, model_type, model_name+'-F-'+'best.ckpt'))
+                ckpt = torch.load(os.path.join(model_save_dir, model_type, model_name+'-F-'+cutoff+'best.ckpt'))
                 try:
                     F.load_state_dict(ckpt['model'])
                 except:
