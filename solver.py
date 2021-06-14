@@ -78,7 +78,7 @@ class Solver(object):
         self.model.to(self.device)
 
         self.Interp = InterpLnr(self.config)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), self.lr, [self.beta1, self.beta2])
+        self.optimizer = torch.optim.Adam(self.model.parameters(), self.lr, [self.beta1, self.beta2], weight_decay=1e-6)
         self.Interp.to(self.device)
 
         self.scheduler = STLR(self.optimizer, num_iters=self.num_iters, cut_frac=0.1, ratio=32)
