@@ -61,7 +61,7 @@ class Encoder_t(nn.Module):
                          kernel_size=5, stride=1,
                          padding=2,
                          dilation=1, w_init_gain='relu'),
-                nn.Dropout(p=0.1),
+                nn.Dropout(p=0.2),
                 nn.GroupNorm(self.dim_enc_2//self.chs_grp, self.dim_enc_2))
             convolutions.append(conv_layer)
         self.convolutions = nn.ModuleList(convolutions)
@@ -110,7 +110,6 @@ class Encoder_6(nn.Module):
                          kernel_size=5, stride=1,
                          padding=2,
                          dilation=1, w_init_gain='relu'),
-                nn.Dropout(p=0.1),
                 nn.GroupNorm(self.dim_enc_3//self.chs_grp, self.dim_enc_3))
             convolutions.append(conv_layer)
         self.convolutions = nn.ModuleList(convolutions)
@@ -167,12 +166,11 @@ class Encoder_7(nn.Module):
                          kernel_size=5, stride=1,
                          padding=2,
                          dilation=1, w_init_gain='relu'),
-                nn.Dropout(p=0.1),
                 nn.GroupNorm(self.dim_enc//self.chs_grp, self.dim_enc))
             convolutions.append(conv_layer)
         self.convolutions_1 = nn.ModuleList(convolutions)
         
-        self.lstm_1 = nn.LSTM(self.dim_enc, self.dim_neck, 2, batch_first=True, bidirectional=True, dropout=0.1)
+        self.lstm_1 = nn.LSTM(self.dim_enc, self.dim_neck, 2, batch_first=True, bidirectional=True)
         
         # convolutions for f0
         convolutions = []
@@ -246,7 +244,7 @@ class Decoder_3(nn.Module):
         self.dim_neck_3 = config.dim_neck_3
         
         self.lstm = nn.LSTM(self.dim_neck*2+self.dim_neck_2*2+self.dim_neck_3*2+self.dim_emb, 
-                            512, 3, batch_first=True, bidirectional=True, dropout=0.1)
+                            512, 3, batch_first=True, bidirectional=True)
         
         self.linear_projection = LinearNorm(1024, self.dim_freq)
 
@@ -271,7 +269,7 @@ class Decoder_4(nn.Module):
         self.dim_neck_3 = config.dim_neck_3
         
         self.lstm = nn.LSTM(self.dim_neck_2*2+self.dim_neck_3*2, 
-                            256, 2, batch_first=True, bidirectional=True, dropout=0.1)
+                            256, 2, batch_first=True, bidirectional=True)
         
         self.linear_projection = LinearNorm(512, self.dim_f0)
 
