@@ -214,7 +214,7 @@ if __name__ == '__main__':
                 cutoff = config.cutoff
             
                 G = Generator(config).eval().to(device)
-                ckpt = torch.load(os.path.join(model_save_dir, model_type, model_name+'-G-'+cutoff+'best.ckpt'))
+                ckpt = torch.load(os.path.join(model_save_dir, model_type, model_name+'-G-'+str(cutoff)+'-best.ckpt'))
                 try:
                     G.load_state_dict(ckpt['model'])
                 except:
@@ -224,7 +224,7 @@ if __name__ == '__main__':
                     G.load_state_dict(new_state_dict)
 
                 F = F0_Converter(config).eval().to(device)
-                ckpt = torch.load(os.path.join(model_save_dir, model_type, model_name+'-F-'+cutoff+'best.ckpt'))
+                ckpt = torch.load(os.path.join(model_save_dir, model_type, model_name+'-F-'+str(cutoff)+'-best.ckpt'))
                 try:
                     F.load_state_dict(ckpt['model'])
                 except:

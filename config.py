@@ -30,7 +30,7 @@ def get_config():
     parser.add_argument('--cutoff', type=int, default=3)
 
     # Dataloader
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--mode', type=str, default='train')
     parser.add_argument('--shuffle', type=str2bool, default=True)
     parser.add_argument('--num_workers', type=int, default=16)
@@ -57,9 +57,10 @@ def get_config():
     parser.add_argument('--min_len_seq', type=int, default=64)
     parser.add_argument('--max_len_seq', type=int, default=128)
     parser.add_argument('--max_len_pad', type=int, default=192)
+    parser.add_argument('--dropout', type=float, default=0.2)
 
     # Training configuration.
-    parser.add_argument('--num_iters', type=int, default=800000, help='number of total iterations')
+    parser.add_argument('--num_iters', type=int, default=400000, help='number of total iterations')
     parser.add_argument('--lr', type=float, default=5e-4, help='learning rate')
     parser.add_argument('--beta1', type=float, default=0.9, help='beta1 for Adam optimizer')
     parser.add_argument('--beta2', type=float, default=0.999, help='beta2 for Adam optimizer')
@@ -74,7 +75,7 @@ def get_config():
 
     # Step size.
     parser.add_argument('--log_step', type=int, default=100)
-    parser.add_argument('--sample_step', type=int, default=20000)
+    parser.add_argument('--sample_step', type=int, default=40000)
     parser.add_argument('--model_save_step', type=int, default=20000)
 
     config = parser.parse_args()

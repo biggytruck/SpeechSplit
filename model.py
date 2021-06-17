@@ -52,6 +52,7 @@ class Encoder_t(nn.Module):
         self.dim_enc_2 = config.dim_enc_2
         self.dim_emb = config.dim_spk_emb
         self.chs_grp = config.chs_grp
+        self.dropout = config.dropout
         
         convolutions = []
         for i in range(1):
@@ -61,7 +62,7 @@ class Encoder_t(nn.Module):
                          kernel_size=5, stride=1,
                          padding=2,
                          dilation=1, w_init_gain='relu'),
-                nn.Dropout(p=0.2),
+                nn.Dropout(p=self.dropout),
                 nn.GroupNorm(self.dim_enc_2//self.chs_grp, self.dim_enc_2))
             convolutions.append(conv_layer)
         self.convolutions = nn.ModuleList(convolutions)
@@ -151,7 +152,7 @@ class Encoder_7(nn.Module):
         self.freq_3 = config.freq_3
         self.dim_enc = config.dim_enc
         self.dim_enc_3 = config.dim_enc_3
-        self.dim_freq = config.dim_freq if config.experiment == 'spsp1' else config.dim_freq+1
+        self.dim_freq = config.dim_freq
         self.chs_grp = config.chs_grp
         self.register_buffer('len_org', torch.tensor(config.max_len_pad))
         self.dim_neck_3 = config.dim_neck_3

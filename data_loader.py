@@ -77,7 +77,8 @@ class Utterances(data.Dataset):
         #     melsp_C = get_spmel(wav_tmp).astype(np.float32)
         # else:
         #     melsp_C = melsp
-        melsp_C = np.hstack((melsp_filt, melsp))
+        # melsp_C = np.hstack((melsp_filt, melsp))
+        melsp_C = melsp
         
         return spk_id_org, melsp, melsp_R, melsp_C, emb_org, f0_org
     

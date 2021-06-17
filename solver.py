@@ -123,6 +123,7 @@ class Solver(object):
                     new_state_dict[k[7:]] = v
                 self.model.load_state_dict(new_state_dict)
             self.optimizer.load_state_dict(ckpt['optimizer'])
+            self.scheduler.load_state_dict(ckpt['scheduler'])
             self.lr = self.optimizer.param_groups[0]['lr']
         
         
@@ -236,7 +237,8 @@ class Solver(object):
             if (i+1) % self.model_save_step == 0:
                 ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}-{}.ckpt'.format(self.model_name, self.model_type, self.cutoff, i+1))
                 torch.save({'model': self.model.state_dict(),
-                            'optimizer': self.optimizer.state_dict()}, ckpt_path)
+                            'optimizer': self.optimizer.state_dict(),
+                            'scheduler': self.scheduler.state_dict()}, ckpt_path)
 
                 print('Saved model checkpoints into {}...'.format(self.model_save_dir))
 
@@ -248,8 +250,8 @@ class Solver(object):
                 if train_loss_id < self.min_loss:
                     self.min_loss = train_loss_id
                     self.min_loss_step = i+1
-                    # ckpt_path = os.path.join(self.model_save_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
-                    # torch.save({'model': self.model.state_dict()}, ckpt_path)
+                    ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}-best.ckpt'.format(self.model_name, self.model_type, self.cutoff))
+                    torch.save({'model': self.model.state_dict()}, ckpt_path)
                     print('Best checkpoint so far: Iteration {}, Training loss: {}'.format(self.min_loss_step, 
                                                                                            self.min_loss))
 
@@ -266,8 +268,9 @@ class Solver(object):
                                                                                        self.min_loss_step, 
                                                                                        self.min_loss))
 
-        ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}-best.ckpt'.format(self.model_name, self.model_type, self.cutoff))
-        torch.save({'model': self.model.state_dict()}, ckpt_path)
+        if self.num_iters == 1:
+            ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}-best.ckpt'.format(self.model_name, self.model_type, self.cutoff))
+            torch.save({'model': self.model.state_dict()}, ckpt_path)
 
 
     def test(self):
