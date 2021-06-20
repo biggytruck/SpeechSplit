@@ -18,9 +18,9 @@ def get_config():
     parser.add_argument('--txt_dir', type=str, default='txt')
     parser.add_argument('--result_dir', type=str, default='result')
     parser.add_argument('--plot_dir', type=str, default='plot')
-    parser.add_argument('--log_dir', type=str, default='run/logs/')
-    parser.add_argument('--model_save_dir', type=str, default='run/models/')
-    parser.add_argument('--sample_dir', type=str, default='run/samples/')
+    parser.add_argument('--log_dir', type=str, default='run3/logs/')
+    parser.add_argument('--model_save_dir', type=str, default='run3/models/')
+    parser.add_argument('--sample_dir', type=str, default='run3/samples/')
     parser.add_argument('--experiment', type=str, default='spsp2')
 
     # Data Preprocessing

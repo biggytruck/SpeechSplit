@@ -123,10 +123,7 @@ def convert(model_type, ctype, src_path, tgt_path, src_id, tgt_id):
     spmel = torch.from_numpy(spmel).to(device)
     spmel_filt = torch.from_numpy(spmel_filt).to(device)
     f0 = torch.from_numpy(f0).to(device)
-    if model_type == 'spsp1':
-        spmel_f0 = torch.cat((spmel, f0), dim=-1)
-    else:
-        spmel_f0 = torch.cat((spmel_filt[:, :, :1], spmel, f0), dim=-1)
+    spmel_f0 = torch.cat((spmel, f0), dim=-1)
     
     rhythm_input = spmel_filt[0].cpu().numpy()
     content_input = spmel_f0[0][:, :-257].cpu().numpy()
@@ -179,11 +176,11 @@ if __name__ == '__main__':
     S.load_ckpt(os.path.join(result_dir, 'wavenet_vocoder.pth'))
 
     model_type_list = [
-        'spsp1',
+        # 'spsp1',
         'spsp2',
     ]
     settings = {
-                'R_8_1': [8,8,8,8,1,32],
+                # 'R_8_1': [8,8,8,8,1,32],
                 # 'R_1_1': [8,1,8,8,1,32],
                 # 'R_8_32': [8,8,8,8,32,32],
                 'R_1_32': [8,1,8,8,32,32],
