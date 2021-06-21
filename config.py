@@ -65,7 +65,7 @@ def get_config():
     parser.add_argument('--beta1', type=float, default=0.9, help='beta1 for Adam optimizer')
     parser.add_argument('--beta2', type=float, default=0.999, help='beta2 for Adam optimizer')
     parser.add_argument('--resume_iters', type=int, default=None, help='resume training from this step')
-    parser.add_argument('--on_server', type=str2bool, default=False, help='whether training on server')
+    parser.add_argument('--on_server', type=str2bool, default=True, help='whether training on server')
 
     # Miscellaneous.
     parser.add_argument('--model_name', type=str, default='default')

@@ -62,7 +62,6 @@ class Encoder_t(nn.Module):
                          kernel_size=5, stride=1,
                          padding=2,
                          dilation=1, w_init_gain='relu'),
-                nn.Dropout(p=self.dropout),
                 nn.GroupNorm(self.dim_enc_2//self.chs_grp, self.dim_enc_2))
             convolutions.append(conv_layer)
         self.convolutions = nn.ModuleList(convolutions)
