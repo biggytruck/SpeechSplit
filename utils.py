@@ -145,7 +145,7 @@ def get_spmel(wav):
 
 def get_spenv(wav, cutoff=3):
     D = pySTFT(wav).T
-    ceps = np.fft.irfft(np.log(D), axis=-1).real # [T, F]
+    ceps = np.fft.irfft(np.log(D+1e-6), axis=-1).real # [T, F]
     F = ceps.shape[1]
     lifter = np.zeros(F)
     lifter[:cutoff] = 1
@@ -165,8 +165,9 @@ def extract_f0(wav, fs, lo, hi):
     f0_rapt = sptk.rapt(wav.astype(np.float32)*32768, fs, 256, min=lo, max=hi, otype=2)
     index_nonzero = (f0_rapt != -1e10)
     if len(index_nonzero==0):
-        return f0_rapt, f0_rapt
-    mean_f0, std_f0 = np.mean(f0_rapt[index_nonzero]), np.std(f0_rapt[index_nonzero])
+        mean_f0 = std_f0 = -1e10
+    else:
+        mean_f0, std_f0 = np.mean(f0_rapt[index_nonzero]), np.std(f0_rapt[index_nonzero])
     f0_norm = speaker_normalization(f0_rapt, index_nonzero, mean_f0, std_f0)
     return f0_rapt, f0_norm
 
