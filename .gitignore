@@ -157,3 +157,6 @@ script.py
 model_diagram
 
 metrics.json
+
+split/
+whole/
