@@ -139,6 +139,11 @@ class Solver(object):
         
                 
     def train(self):
+        if self.num_iters == 1:
+            ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}-best.ckpt'.format(self.model_name, self.model_type, self.cutoff))
+            torch.save({'model': self.model.state_dict()}, ckpt_path)
+            return
+
         # Start training from scratch or resume training.
         start_iters = 0
         if self.resume_iters:
@@ -267,10 +272,6 @@ class Solver(object):
         print('Best checkpoint for model {}: Iteration {}, Validation loss: {}'.format(self.model_name,
                                                                                        self.min_loss_step, 
                                                                                        self.min_loss))
-
-        if self.num_iters == 1:
-            ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}-best.ckpt'.format(self.model_name, self.model_type, self.cutoff))
-            torch.save({'model': self.model.state_dict()}, ckpt_path)
 
 
     def test(self):
