@@ -4,8 +4,6 @@ import pickle
 import numpy as np
 from random import choice
 
-from multiprocessing import Process, Manager  
-
 from torch.utils import data
 from torch.utils.data.sampler import Sampler
 from torchaudio.sox_effects import apply_effects_tensor
@@ -31,19 +29,8 @@ class Utterances(data.Dataset):
         metaname = os.path.join(self.root_dir, 'dataset.pkl')
         meta = pickle.load(open(metaname, "rb"))
         
-        # load data using multiple processes
-        manager = Manager()
-        meta = manager.list(meta)
-        dataset = manager.list(len(meta)*[None])  # <-- can be shared between processes.
-        processes = []
-        for i in range(0, len(meta), self.step):
-            p = Process(target=self.load_data, 
-                        args=(meta[i:i+self.step],dataset,i))  
-            p.start()
-            processes.append(p)
-        for p in processes:
-            p.join()
-
+        dataset = [None] * len(meta)
+        self.load_data(meta, dataset, 0)
         self.dataset = list(dataset)
         self.num_tokens = len(self.dataset)
 
@@ -158,8 +145,6 @@ class MultiSampler(Sampler):
 def get_loader(config):
     """Build and return a data loader list."""
 
-    if config.on_server:
-        torch.multiprocessing.set_sharing_strategy('file_system')
     dataset = Utterances(config)
     collator = Collator(config)
     sampler = MultiSampler(len(dataset), config.samplier, shuffle=config.shuffle)
