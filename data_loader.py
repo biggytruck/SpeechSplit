@@ -10,6 +10,7 @@ from torchaudio.sox_effects import apply_effects_tensor
 
 from utils import get_spmel, get_spenv
 
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 class Utterances(data.Dataset):
     """Dataset class for the Utterances dataset."""
