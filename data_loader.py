@@ -21,6 +21,7 @@ class Utterances(data.Dataset):
         self.spmel_dir = os.path.join(self.root_dir, config.spmel_dir)
         self.spmel_filt_dir = os.path.join(self.root_dir, config.spmel_filt_dir)
         self.spenv_dir = os.path.join(self.root_dir, config.spenv_dir+str(config.cutoff))
+        self.spmel_smooth_dir = os.path.join(self.root_dir, config.spmel_smooth_dir)
         self.f0_dir = os.path.join(self.root_dir, config.f0_dir)
         self.mode = config.mode
         self.step = 300
@@ -44,8 +45,10 @@ class Utterances(data.Dataset):
             wav_tmp = np.load(os.path.join(self.wav_dir, sbmt[2])) 
             sp_tmp = np.load(os.path.join(self.spmel_dir, sbmt[2]))
             sp_filt_tmp = np.load(os.path.join(self.spmel_filt_dir, sbmt[2]))
+            spenv_tmp = np.load(os.path.join(self.spenv_dir, sbmt[2]))
+            sp_smooth_tmp = np.load(os.path.join(self.spmel_smooth_dir, sbmt[2]))
             f0_tmp = np.load(os.path.join(self.f0_dir, sbmt[2]))
-            uttrs[2] = ( wav_tmp, sp_tmp, sp_filt_tmp, f0_tmp )
+            uttrs[2] = ( wav_tmp, sp_tmp, sp_filt_tmp, spenv_tmp, sp_smooth_tmp, f0_tmp )
             dataset[idx_offset+k] = uttrs  
         
 
@@ -53,9 +56,11 @@ class Utterances(data.Dataset):
         list_uttrs = self.dataset[index]
         spk_id_org = list_uttrs[0]
         emb_org = list_uttrs[1]
-        wav_tmp, melsp, melsp_filt, f0_org = list_uttrs[2]
+        wav_tmp, melsp, melsp_filt, melse, melsp_smooth, f0_org = list_uttrs[2]
+        melsp_R = np.hstack((melsp_filt, melse))
+        melsp_C = melsp_smooth
         
-        return wav_tmp, spk_id_org, melsp, melsp_filt, emb_org, f0_org
+        return wav_tmp, spk_id_org, melsp, melsp_R, melsp_C, emb_org, f0_org
     
 
     def __len__(self):
@@ -72,26 +77,16 @@ class Collator(object):
         self.mode = config.mode
 
     def __call__(self, batch):
-        cent = choice([np.random.randint(-400, -200), np.random.uniform(200, 400)])
-        effects = [
-            ['pitch', str(cent)],
-            ['rate', '16000']
-        ]
-        wav_tmps = torch.FloatTensor([token[0] for token in batch])
-        wav_shifts = apply_effects_tensor(wav_tmps, 16000, effects, channels_first=True)[0].numpy()
-        
         new_batch = []
-        for wav_shift, token in zip(wav_shifts, batch):
+        for token in batch:
 
-            spk_id_org, melsp, melsp_filt, emb_org, f0_org = token[1:]
+            wav_tmp, spk_id_org, melsp, melsp_R, melsp_C, emb_org, f0_org = token
             len_crop = np.random.randint(self.min_len_seq, self.max_len_seq+1) if self.mode == 'train' else  self.max_len_pad # 1.5s ~ 3s
             left = np.random.randint(0, len(melsp)-len_crop) if self.mode == 'train' else 0
 
             melsp = melsp[left:left+len_crop, :] # [Lc, F]
-            melsp_filt = melsp_filt[left:left+len_crop, :] # [Lc, 1]
-            melse = get_spenv(wav_shift)[left:left+len_crop, :] # [Lc, F]
-            melsp_R = np.hstack((melsp_filt, melse))
-            melsp_C = get_spmel(wav_shift)[left:left+len_crop, :] # [Lc, F]
+            melsp_R = melsp_R[left:left+len_crop, :] # [Lc, F]
+            melsp_C = melsp_C[left:left+len_crop, :] # [Lc, F]
             f0_org = f0_org[left:left+len_crop] # [Lc, ]
             
             melsp = np.clip(melsp, 0, 1)

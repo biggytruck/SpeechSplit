@@ -11,9 +11,10 @@ from scipy import signal
 from librosa.filters import mel
 from librosa.core import resample
 from librosa.util import fix_length
-from scipy.signal import get_window, filtfilt, medfilt2d
-from acoustics.cepstrum import real_cepstrum
+from scipy.signal import get_window, medfilt2d
 from math import pi, sqrt, exp
+import pyworld as pw
+from soundfile import write
 
 
 mel_basis = mel(16000, 1024, fmin=90, fmax=7600, n_mels=80).T
@@ -320,6 +321,23 @@ def get_spmel_filt(spmel):
     spmel_filt = zero_one_norm(spmel_filt)
     spmel_filt = spmel_filt[:, :1]
     return spmel_filt
+
+
+def removef0(x, fs=16000):
+    _f0, t = pw.dio(x, fs)    # raw pitch extractor
+    f0 = pw.stonemask(x, _f0, t, fs)  # pitch refinement
+    sp = pw.cheaptrick(x, f0, t, fs)  # extract smoothed spectrogram
+    ap = pw.d4c(x, f0, t, fs)         # extract aperiodicity
+    v = (f0>0)
+    uv = (f0<=0)
+    f0 = np.ones_like(f0) * np.mean(f0[v])
+    f0[uv] = 0
+
+    y = pw.synthesize(f0, sp, ap, fs) # synthesize an utterance using the parameters
+    if len(y)<len(x):
+        y = np.pad(y, (len(x)-len(y), 0))
+    assert len(y) >= len(x)
+    return y[-len(x):]
 
 
 def get_common_wav_ids(txt_dir):

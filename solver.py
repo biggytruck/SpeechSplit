@@ -471,29 +471,33 @@ class Solver(object):
                 raise ValueError
 
             # plot input
-            x_f0 = x_f0[0].cpu().numpy().T
-            x_f0_woF = x_f0_woF[0].cpu().numpy().T
-            x_f0_woC = x_f0_woC[0].cpu().numpy().T
-            x_f0_woCF = x_f0_woCF[0].cpu().numpy().T
-            x_real_org_orig = x_real_org[0].cpu().numpy().T
-            x_real_org_filt = x_real_org_filt[0].cpu().numpy().T
+            x_real_org_filt = x_real_org_filt[0].cpu().numpy()
+            x_real_org_warp = x_real_org_warp[0].cpu().numpy()
+            f0_org_one_hot = f0_org_one_hot[0].cpu().numpy()
+            print(x_real_org_filt.shape, x_real_org_warp.shape, f0_org_one_hot.shape)
 
-            min_value = np.min(np.vstack([x_f0, x_f0_woF, x_f0_woC, x_f0_woCF, x_real_org_orig, x_real_org_filt]))
-            max_value = np.max(np.vstack([x_f0, x_f0_woF, x_f0_woC, x_f0_woCF, x_real_org_orig, x_real_org_filt]))
+            spenv = x_real_org_filt[:, 1:]
+            dog_output = x_real_org_filt[:, :1]
+            print(spenv.shape, dog_output.shape)
+            dog_output = np.repeat(dog_output, spenv.shape[1], axis=1)
+            print(spenv.shape, dog_output.shape)
+            spenv = spenv.T
+            dog_output = dog_output.T
+            mono_spmel = x_real_org_warp.T
+            pitch_contour = f0_org_one_hot.T
+
+            min_value = np.min(np.vstack([spenv, dog_output, mono_spmel, pitch_contour]))
+            max_value = np.max(np.vstack([spenv, dog_output, mono_spmel, pitch_contour]))
             
-            fig, (ax1,ax2,ax3,ax4,ax5,ax6) = plt.subplots(6, 1, sharex=True, figsize=(12, 10))
-            ax1.set_title('x_f0', fontsize=10)
-            ax2.set_title('x_f0_woF', fontsize=10)
-            ax3.set_title('x_f0_woC', fontsize=10)
-            ax4.set_title('x_f0_woCF', fontsize=10)
-            ax5.set_title('x_real_org_orig', fontsize=10)
-            ax6.set_title('x_real_org_filt', fontsize=10)
-            _ = ax1.imshow(x_f0, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax2.imshow(x_f0_woF, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax3.imshow(x_f0_woC, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax4.imshow(x_f0_woCF, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax5.imshow(x_real_org_orig, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax6.imshow(x_real_org_filt, aspect='auto', vmin=min_value, vmax=max_value)
+            fig, (ax1,ax2,ax3,ax4) = plt.subplots(4, 1, sharex=True, figsize=(12, 10))
+            ax1.set_title('Spectral Envelope', fontsize=10)
+            ax2.set_title('DoG output', fontsize=10)
+            ax3.set_title('Monotonic Mel-Spectrogram', fontsize=10)
+            ax4.set_title('Pitch Contour', fontsize=10)
+            _ = ax1.imshow(spenv, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax2.imshow(dog_output, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax3.imshow(mono_spmel, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax4.imshow(pitch_contour, aspect='auto', vmin=min_value, vmax=max_value)
             plt.savefig(f'{self.sample_dir}/{self.model_name}_{self.mode}_input_{spk_id_org[0]}_{step}.png', dpi=150)
             plt.close(fig)
 

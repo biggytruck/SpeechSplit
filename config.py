@@ -14,6 +14,7 @@ def get_config():
     parser.add_argument('--spmel_dir', type=str, default='spmel')
     parser.add_argument('--spmel_filt_dir', type=str, default='spmel_filt')
     parser.add_argument('--spenv_dir', type=str, default='spenv')
+    parser.add_argument('--spmel_smooth_dir', type=str, default='spmel_smooth')
     parser.add_argument('--f0_dir', type=str, default='f0')
     parser.add_argument('--txt_dir', type=str, default='txt')
     parser.add_argument('--result_dir', type=str, default='result')

@@ -1,6 +1,6 @@
 import os
-import sys
 import pickle
+from librosa.core.audio import get_samplerate
 import numpy as np
 import soundfile as sf
 from numpy.random import RandomState
@@ -15,6 +15,7 @@ def make_spect_f0(config):
     spmel_dir = os.path.join(root_dir, config.spmel_dir)
     spmel_filt_dir = os.path.join(root_dir, config.spmel_filt_dir)
     spenv_dir = os.path.join(root_dir, config.spenv_dir+str(cutoff))
+    spmel_smooth_dir = os.path.join(root_dir, config.spmel_smooth_dir)
     f0_dir = os.path.join(root_dir, config.f0_dir)
     spk2gen = pickle.load(open('spk2gen.pkl', "rb"))
 
@@ -33,6 +34,8 @@ def make_spect_f0(config):
             os.makedirs(os.path.join(spmel_filt_dir, sub_dir))
         if not os.path.exists(os.path.join(spenv_dir, sub_dir)):
             os.makedirs(os.path.join(spenv_dir, sub_dir))
+        if not os.path.exists(os.path.join(spmel_smooth_dir, sub_dir)):
+            os.makedirs(os.path.join(spmel_smooth_dir, sub_dir))
         if not os.path.exists(os.path.join(f0_dir, sub_dir)):
             os.makedirs(os.path.join(f0_dir, sub_dir))    
         _,_, file_list = next(os.walk(os.path.join(dir_name,sub_dir)))
@@ -56,30 +59,38 @@ def make_spect_f0(config):
             else:
                 wav = x
             
-            # compute spectrogram
-            spmel = get_spmel(wav)
+            # # compute spectrogram
+            # spmel = get_spmel(wav)
 
-            # compute filtered spectrogram
-            spmel_filt = get_spmel_filt(spmel)
+            # # compute filtered spectrogram
+            # spmel_filt = get_spmel_filt(spmel)
 
-            # get spectral envelope
-            spenv = get_spenv(wav, cutoff)
+            # # get spectral envelope
+            # spenv = get_spenv(wav, cutoff)
             
-            # extract f0
-            f0_rapt, f0_norm = extract_f0(wav, fs, lo, hi)
-            
-            assert len(spmel) == len(f0_rapt)
+            # # extract f0
+            # f0_rapt, f0_norm = extract_f0(wav, fs, lo, hi)
 
-            np.save(os.path.join(wav_dir, sub_dir, os.path.splitext(filename)[0]),
-                    wav.astype(np.float32), allow_pickle=False)     
-            np.save(os.path.join(spmel_dir, sub_dir, os.path.splitext(filename)[0]),
-                    spmel.astype(np.float32), allow_pickle=False) 
-            np.save(os.path.join(spmel_filt_dir, sub_dir, os.path.splitext(filename)[0]),
-                    spmel_filt.astype(np.float32), allow_pickle=False) 
-            np.save(os.path.join(spenv_dir, sub_dir, os.path.splitext(filename)[0]),
-                    spenv.astype(np.float32), allow_pickle=False) 
-            np.save(os.path.join(f0_dir, sub_dir, os.path.splitext(filename)[0]),
-                    f0_norm.astype(np.float32), allow_pickle=False)
+            # use world to smooth out pitch contour
+            wav_wo_f0 = removef0(wav, fs)
+            
+            # compute the spectrogram after f0 is removed
+            spmel_smooth = get_spmel(wav_wo_f0)
+            
+            # assert len(spmel) == len(f0_rapt)
+
+            # np.save(os.path.join(wav_dir, sub_dir, os.path.splitext(filename)[0]),
+            #         wav.astype(np.float32), allow_pickle=False)     
+            # np.save(os.path.join(spmel_dir, sub_dir, os.path.splitext(filename)[0]),
+            #         spmel.astype(np.float32), allow_pickle=False) 
+            # np.save(os.path.join(spmel_filt_dir, sub_dir, os.path.splitext(filename)[0]),
+            #         spmel_filt.astype(np.float32), allow_pickle=False) 
+            # np.save(os.path.join(spenv_dir, sub_dir, os.path.splitext(filename)[0]),
+            #         spenv.astype(np.float32), allow_pickle=False) 
+            np.save(os.path.join(spmel_smooth_dir, sub_dir, os.path.splitext(filename)[0]),
+                    spmel_smooth.astype(np.float32), allow_pickle=False) 
+            # np.save(os.path.join(f0_dir, sub_dir, os.path.splitext(filename)[0]),
+            #         f0_norm.astype(np.float32), allow_pickle=False)
 
 def make_metadata(config):
     root_dir = os.path.join(config.root_dir, config.mode)
