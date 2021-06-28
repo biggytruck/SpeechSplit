@@ -474,13 +474,10 @@ class Solver(object):
             x_real_org_filt = x_real_org_filt[0].cpu().numpy()
             x_real_org_warp = x_real_org_warp[0].cpu().numpy()
             f0_org_one_hot = f0_org_one_hot[0].cpu().numpy()
-            print(x_real_org_filt.shape, x_real_org_warp.shape, f0_org_one_hot.shape)
 
             spenv = x_real_org_filt[:, 1:]
             dog_output = x_real_org_filt[:, :1]
-            print(spenv.shape, dog_output.shape)
             dog_output = np.repeat(dog_output, spenv.shape[1], axis=1)
-            print(spenv.shape, dog_output.shape)
             spenv = spenv.T
             dog_output = dog_output.T
             mono_spmel = x_real_org_warp.T
