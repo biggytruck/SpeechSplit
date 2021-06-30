@@ -37,6 +37,37 @@ class ConvNorm(torch.nn.Module):
     def forward(self, signal):
         conv_signal = self.conv(signal)
         return conv_signal
+
+
+
+class Pitch_Extractor(nn.Module):
+        
+    def __init__(self, config):
+        super().__init__()
+
+        self.dim_f0 = config.dim_f0
+        self.extractor = nn.Sequential(
+            nn.Conv2d(in_channels=1, out_channels=16, kernel_size=5, padding=2),
+            nn.ReLU(inplace=True),
+            nn.AvgPool2d(kernel_size=(1, 2)),
+            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=5, padding=2),
+            nn.ReLU(inplace=True),
+            nn.AvgPool2d(kernel_size=(1, 2))
+        )
+        self.projector = nn.Sequential(
+            nn.AdaptiveAvgPool1d(256),
+            LinearNorm(256, self.dim_f0)
+        )
+
+    def forward(self, x):
+        
+        f0 = x.unsqueeze(1)
+        f0 = self.extractor(f0)
+        f0 = f0.transpose(1, 2)
+        f0 = torch.flatten(f0, start_dim=2)
+        f0 = self.projector(f0)
+
+        return f0
     
     
     
@@ -292,6 +323,7 @@ class Generator_3(nn.Module):
         self.encoder_1 = Encoder_7(config)
         self.encoder_2 = Encoder_t(config)
         self.decoder = Decoder_3(config)
+        self.pitch_extractor = Pitch_Extractor(config)
     
         self.freq = config.freq
         self.freq_2 = config.freq_2
@@ -312,8 +344,9 @@ class Generator_3(nn.Module):
                                      c_trg.unsqueeze(1).expand(-1,x_1.size(-1),-1)), dim=-1)
         
         mel_outputs = self.decoder(encoder_outputs)
+        f0_outputs = self.pitch_extractor(mel_outputs)
         
-        return mel_outputs
+        return mel_outputs, f0_outputs
     
     def rhythm(self, x_org):
         x_2 = x_org.transpose(2,1)

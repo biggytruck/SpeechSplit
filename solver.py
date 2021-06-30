@@ -190,7 +190,7 @@ class Solver(object):
             x_f0_intrp = self.Interp(x_f0_intrp, len_org) # [B, T, F+1]
             f0_org_intrp = quantize_f0_torch(x_f0_intrp[:,:,-1])[0] # [B, T, 257]
             x_f0_intrp_org = torch.cat((x_f0_intrp[:,:,:-1], f0_org_intrp), dim=-1) # [B, T, F+257]
-            
+            f0_org_quantized = quantize_f0_torch(f0_org)[1].view(-1)
             if self.experiment == 'spsp1':
                 if self.model_type == 'G':
                     x_identic = self.model(x_f0_intrp_org, x_real_org, emb_org)
@@ -201,8 +201,10 @@ class Solver(object):
                     loss_id = F.cross_entropy(x_identic, f0_org_quantized)
             elif self.experiment == 'spsp2':
                 if self.model_type == 'G':
-                    x_identic = self.model(x_f0_intrp_org, x_real_org_filt, emb_org)
+                    x_identic, f0_identic = self.model(x_f0_intrp_org, x_real_org_filt, emb_org)
+                    f0_identic = f0_identic.view(f0_identic.shape[0]*f0_identic.shape[1], -1)
                     loss_id = F.mse_loss(x_identic, x_real_org) 
+                    loss_ce = F.cross_entropy(f0_identic, f0_org_quantized)
                 else:
                     x_identic = self.model(x_real_org_filt, f0_org_intrp).view(-1, self.config.dim_f0)
                     f0_org_quantized = quantize_f0_torch(f0_org)[1].view(-1)
@@ -211,7 +213,7 @@ class Solver(object):
                 raise ValueError
            
             # Backward and optimize.
-            loss = loss_id
+            loss = loss_id+loss_ce if self.model_type == 'G' else loss_id
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
@@ -219,6 +221,8 @@ class Solver(object):
 
             # Logging.
             train_loss_id = loss_id.item()
+            if self.model_type == 'G':
+                train_loss_ce = loss_ce.item()
 
             # =================================================================================== #
             #                           3. Logging and saveing checkpoints                        #
@@ -230,9 +234,13 @@ class Solver(object):
                 et = str(datetime.timedelta(seconds=et))[:-7]
                 log = "Elapsed [{}], Iteration [{}/{}]".format(et, i+1, self.num_iters)
                 log += ", {}/train_loss_id: {:.8f}".format(self.model_type, train_loss_id)
+                if self.model_type == 'G':
+                    log += ", {}/train_loss_ce: {:.8f}".format(self.model_type, train_loss_ce)
                 print(log)
                 if self.use_tensorboard:
                     self.writer.add_scalar(f'{self.model_type}/train_loss_id', train_loss_id, i+1)
+                    if self.model_type == 'G':
+                        self.writer.add_scalar(f'{self.model_type}/train_loss_ce', train_loss_ce, i+1)
 
             # Plot spectrograms for training and validation data
             if (i+1) % self.sample_step == 0 and self.model_type == 'G':
@@ -249,6 +257,8 @@ class Solver(object):
 
                 if self.use_tensorboard:
                     self.writer.add_scalar(f'{self.model_type}/train_loss_id', train_loss_id, i+1)
+                    if self.model_type == 'G':
+                        self.writer.add_scalar(f'{self.model_type}/train_loss_ce', train_loss_ce, i+1)
                 
                 # current use training loss to find best model
                 # may change to validation loss for better generalization but need to do train-val split
@@ -448,12 +458,12 @@ class Solver(object):
                 x_f0_woC = torch.cat((torch.zeros_like(x_real_org), f0_org_one_hot), dim=-1) # [B, T, F+257]
                 x_f0_woCF = torch.zeros_like(x_f0) # [B, T, F+257]
             
-                x_identic = self.model(x_f0, x_real_org, emb_org, rr=False)
-                x_identic_woF = self.model(x_f0_woF, x_real_org, emb_org, rr=False)
-                x_identic_woR = self.model(x_f0, torch.zeros_like(x_real_org), emb_org, rr=False)
-                x_identic_woC = self.model(x_f0_woC, x_real_org, emb_org, rr=False)
-                x_identic_woT = self.model(x_f0, x_real_org, torch.zeros_like(emb_org), rr=False)
-                x_identic_woCF = self.model(x_f0_woCF, x_real_org, emb_org, rr=False)
+                x_identic, _ = self.model(x_f0, x_real_org, emb_org, rr=False)
+                x_identic_woF, _ = self.model(x_f0_woF, x_real_org, emb_org, rr=False)
+                x_identic_woR, _ = self.model(x_f0, torch.zeros_like(x_real_org), emb_org, rr=False)
+                x_identic_woC, _ = self.model(x_f0_woC, x_real_org, emb_org, rr=False)
+                x_identic_woT, _ = self.model(x_f0, x_real_org, torch.zeros_like(emb_org), rr=False)
+                x_identic_woCF, _ = self.model(x_f0_woCF, x_real_org, emb_org, rr=False)
             elif self.experiment == 'spsp2':
                 f0_org_one_hot = quantize_f0_torch(f0_org)[0] # [B, T, 257]
                 x_f0 = torch.cat((x_real_org_warp, f0_org_one_hot), dim=-1) # [B, T, F+1+257]
@@ -461,12 +471,12 @@ class Solver(object):
                 x_f0_woC = torch.cat((torch.zeros_like(x_real_org_warp), f0_org_one_hot), dim=-1) # [B, T, F+1+257]
                 x_f0_woCF = torch.zeros_like(x_f0) # [B, T, F+1+257]
 
-                x_identic = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
-                x_identic_woF = self.model(x_f0_woF, x_real_org_filt, emb_org, rr=False)
-                x_identic_woR = self.model(x_f0, torch.zeros_like(x_real_org_filt), emb_org, rr=False)
-                x_identic_woC = self.model(x_f0_woC, x_real_org_filt, emb_org, rr=False)
-                x_identic_woT = self.model(x_f0, x_real_org_filt, torch.zeros_like(emb_org), rr=False)
-                x_identic_woCF = self.model(x_f0_woCF, x_real_org_filt, emb_org, rr=False)
+                x_identic, _ = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
+                x_identic_woF, _ = self.model(x_f0_woF, x_real_org_filt, emb_org, rr=False)
+                x_identic_woR, _ = self.model(x_f0, torch.zeros_like(x_real_org_filt), emb_org, rr=False)
+                x_identic_woC, _ = self.model(x_f0_woC, x_real_org_filt, emb_org, rr=False)
+                x_identic_woT, _ = self.model(x_f0, x_real_org_filt, torch.zeros_like(emb_org), rr=False)
+                x_identic_woCF, _ = self.model(x_f0_woCF, x_real_org_filt, emb_org, rr=False)
             else:
                 raise ValueError
 
@@ -507,6 +517,7 @@ class Solver(object):
             melsp_woT = x_identic_woT[0].cpu().numpy().T
             melsp_woCF = x_identic_woCF[0].cpu().numpy().T
 
+            print([x.shape for x in [melsp_gd_pad, melsp_out, melsp_woF, melsp_woR, melsp_woC, melsp_woT, melsp_woCF]])
             min_value = np.min(np.hstack([melsp_gd_pad, melsp_out, melsp_woF, melsp_woR, melsp_woC, melsp_woT, melsp_woCF]))
             max_value = np.max(np.hstack([melsp_gd_pad, melsp_out, melsp_woF, melsp_woR, melsp_woC, melsp_woT, melsp_woCF]))
             
