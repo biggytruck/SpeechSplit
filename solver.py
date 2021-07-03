@@ -10,7 +10,7 @@ import os
 import time
 import datetime
 from collections import OrderedDict
-from utils import quantize_f0_torch
+from utils import quantize_f0_torch, tensor2onehot
 
 
 class Solver(object):
@@ -186,8 +186,9 @@ class Solver(object):
             # =================================================================================== #
 
             # Identity mapping loss
-            x_f0_intrp = torch.cat((x_real_org_warp, f0_org), dim=-1) # [B, T, F+1]
-            x_f0_intrp = self.Interp(x_f0_intrp, len_org) # [B, T, F+1]
+            x_f0 = torch.cat((x_real_org_warp, f0_org), dim=-1) # [B, T, F+1]
+            x_filt_org = torch.cat((x_real_org_filt[:,:,:1], x_real_org_warp), dim=-1) # [B, T, F+1]
+            x_f0_intrp = self.Interp(x_f0, len_org) # [B, T, F+1]
             f0_org_intrp = quantize_f0_torch(x_f0_intrp[:,:,-1])[0] # [B, T, 257]
             x_f0_intrp_org = torch.cat((x_f0_intrp[:,:,:-1], f0_org_intrp), dim=-1) # [B, T, F+257]
             
@@ -204,7 +205,7 @@ class Solver(object):
                     x_identic = self.model(x_f0_intrp_org, x_real_org_filt, emb_org)
                     loss_id = F.mse_loss(x_identic, x_real_org) 
                 else:
-                    x_identic = self.model(x_real_org_filt, f0_org_intrp).view(-1, self.config.dim_f0)
+                    x_identic = self.model(x_filt_org, f0_org_intrp).view(-1, self.config.dim_f0)
                     f0_org_quantized = quantize_f0_torch(f0_org)[1].view(-1)
                     loss_id = F.cross_entropy(x_identic, f0_org_quantized)
             else:
@@ -235,9 +236,12 @@ class Solver(object):
                     self.writer.add_scalar(f'{self.model_type}/train_loss_id', train_loss_id, i+1)
 
             # Plot spectrograms for training and validation data
-            if (i+1) % self.sample_step == 0 and self.model_type == 'G':
-                self.plot(i+1)
-                        
+            if (i+1) % self.sample_step == 0:
+                if self.model_type == 'G':
+                    self.plot_G(i+1)
+                else:
+                    self.plot_F(i+1)
+    
             # Save model checkpoints and the best one if possible
             if (i+1) % self.model_save_step == 0:
                 ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}-{}.ckpt'.format(self.model_name, self.model_type, self.cutoff, i+1))
@@ -294,13 +298,14 @@ class Solver(object):
 
                 # Fetch real images and labels.
                 try:
-                    _, x_real_org, x_real_org_filt, _, emb_org, f0_org, len_org = next(self.data_iter)
+                    _, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
                 except:
                     break
                 
                 batch_size = len(x_real_org)
                 x_real_org = x_real_org.to(self.device)
                 x_real_org_filt = x_real_org_filt.to(self.device)
+                x_real_org_warp = x_real_org_warp.to(self.device)
                 emb_org = emb_org.to(self.device)
                 len_org = len_org.to(self.device)
                 f0_org = f0_org.to(self.device)
@@ -310,8 +315,9 @@ class Solver(object):
                 # =================================================================================== #
                             
                 # Identity mapping loss
+                x_filt_org = torch.cat((x_real_org_filt[:,:,:1], x_real_org_warp), dim=-1) # [B, T, F+1]
                 f0_org_one_hot, f0_org_quantized = quantize_f0_torch(f0_org) # [B, T, 257], [B, T, 1]
-                x_f0 = torch.cat((x_real_org, f0_org_one_hot), dim=-1) # [B, T, F+257]
+                x_f0 = torch.cat((x_real_org_warp, f0_org_one_hot), dim=-1) # [B, T, F+257]
             
                 if self.experiment == 'spsp1':
                     if self.model_type == 'G':
@@ -326,7 +332,7 @@ class Solver(object):
                         x_identic = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
                         loss_id = F.mse_loss(x_identic, x_real_org, reduction='sum')
                     else:
-                        x_identic = self.model(x_real_org_filt, f0_org_one_hot, rr=False).view(-1, self.config.dim_f0)
+                        x_identic = self.model(x_filt_org, f0_org_one_hot, rr=False).view(-1, self.config.dim_f0)
                         f0_org_quantized = f0_org_quantized.view(-1)
                         loss_id = F.cross_entropy(x_identic, f0_org_quantized, reduction='sum')
                 else:
@@ -341,7 +347,7 @@ class Solver(object):
             if self.use_tensorboard:
                 self.writer.add_scalar(f'{self.model_type}/test_loss_id', test_loss_id, self.resume_iters)
 
-        self.plot(self.resume_iters)
+        self.plot_G(self.resume_iters)
 
 
     def validate(self):
@@ -358,13 +364,14 @@ class Solver(object):
 
                 # Fetch real images and labels.
                 try:
-                    _, x_real_org, x_real_org_filt, _, emb_org, f0_org, len_org = next(self.data_iter)
+                    _, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
                 except:
                     break
                 
                 batch_size = len(x_real_org)
                 x_real_org = x_real_org.to(self.device)
                 x_real_org_filt = x_real_org_filt.to(self.device)
+                x_real_org_warp = x_real_org_warp.to(self.device)
                 emb_org = emb_org.to(self.device)
                 len_org = len_org.to(self.device)
                 f0_org = f0_org.to(self.device)
@@ -374,8 +381,9 @@ class Solver(object):
                 # =================================================================================== #
                             
                 # Identity mapping loss
+                x_filt_org = torch.cat((x_real_org_filt[:,:,:1], x_real_org_warp), dim=-1) # [B, T, F+1]
                 f0_org_one_hot, f0_org_quantized = quantize_f0_torch(f0_org) # [B, T, 257], [B, T, 1]
-                x_f0 = torch.cat((x_real_org, f0_org_one_hot), dim=-1) # [B, T, F+257]
+                x_f0 = torch.cat((x_real_org_warp, f0_org_one_hot), dim=-1) # [B, T, F+257]
             
                 if self.experiment == 'spsp1':
                     if self.model_type == 'G':
@@ -390,7 +398,7 @@ class Solver(object):
                         x_identic = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
                         loss_id = F.mse_loss(x_identic, x_real_org, reduction='sum')
                     else:
-                        x_identic = self.model(x_real_org_filt, f0_org_one_hot, rr=False).view(-1, self.config.dim_f0)
+                        x_identic = self.model(x_filt_org, f0_org_one_hot, rr=False).view(-1, self.config.dim_f0)
                         f0_org_quantized = f0_org_quantized.view(-1)
                         loss_id = F.cross_entropy(x_identic, f0_org_quantized, reduction='sum')
                 else:
@@ -411,7 +419,7 @@ class Solver(object):
         return val_loss_id
 
     
-    def plot(self, step):
+    def plot_G(self, step):
         # plot samples
         self.model = self.model.eval()
         
@@ -486,7 +494,7 @@ class Solver(object):
             min_value = np.min(np.vstack([spenv, dog_output, mono_spmel, pitch_contour]))
             max_value = np.max(np.vstack([spenv, dog_output, mono_spmel, pitch_contour]))
             
-            fig, (ax1,ax2,ax3,ax4) = plt.subplots(4, 1, sharex=True, figsize=(12, 10))
+            fig, (ax1,ax2,ax3,ax4) = plt.subplots(4, 1, sharex=True, figsize=(14, 10))
             ax1.set_title('Spectral Envelope', fontsize=10)
             ax2.set_title('DoG output', fontsize=10)
             ax3.set_title('Monotonic Mel-Spectrogram', fontsize=10)
@@ -495,7 +503,7 @@ class Solver(object):
             _ = ax2.imshow(dog_output, aspect='auto', vmin=min_value, vmax=max_value)
             _ = ax3.imshow(mono_spmel, aspect='auto', vmin=min_value, vmax=max_value)
             _ = ax4.imshow(pitch_contour, aspect='auto', vmin=min_value, vmax=max_value)
-            plt.savefig(f'{self.sample_dir}/{self.model_name}_{self.mode}_input_{spk_id_org[0]}_{step}.png', dpi=150)
+            plt.savefig(f'{self.sample_dir}/{self.model_name}_{self.mode}_{self.model_type}_input_{spk_id_org[0]}_{step}.png', dpi=150)
             plt.close(fig)
 
             # plot output
@@ -525,7 +533,93 @@ class Solver(object):
             _ = ax5.imshow(melsp_woF, aspect='auto', vmin=min_value, vmax=max_value)
             _ = ax6.imshow(melsp_woT, aspect='auto', vmin=min_value, vmax=max_value)
             _ = ax7.imshow(melsp_woCF, aspect='auto', vmin=min_value, vmax=max_value)
-            plt.savefig(f'{self.sample_dir}/{self.model_name}_{self.mode}_output_{spk_id_org[0]}_{step}.png', dpi=150)
+            plt.savefig(f'{self.sample_dir}/{self.model_name}_{self.mode}_{self.model_type}_output_{spk_id_org[0]}_{step}.png', dpi=150)
+            plt.close(fig)
+
+        self.model = self.model.train()
+
+
+    def plot_F(self, step):
+        # plot samples
+        self.model = self.model.eval()
+        
+        with torch.no_grad():
+
+            # =================================================================================== #
+            #                             1. Preprocess input data                                #
+            # =================================================================================== #
+
+            # Load data
+            try:
+                spk_id_org, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
+            except:
+                self.data_iter = iter(self.data_loader)
+                spk_id_org, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
+
+            x_real_org = x_real_org.to(self.device)
+            x_real_org_filt = x_real_org_filt.to(self.device)
+            x_real_org_warp = x_real_org_warp.to(self.device)
+            f0_org = f0_org.to(self.device)
+
+            f0_org_one_hot = quantize_f0_torch(f0_org)[0] # [B, T, 257]
+
+            # =================================================================================== #
+            #                             2. Evaluate the generator                               #
+            # =================================================================================== #
+                        
+            # Identity mapping loss
+            if self.experiment == 'spsp1':
+                f0_identic = self.model(x_real_org, f0_org_one_hot, rr=False)
+                f0_identic_woR = self.model(torch.zeros_like(x_real_org), f0_org_one_hot, rr=False)
+            elif self.experiment == 'spsp2':
+                x_filt_org = torch.cat((x_real_org_filt[:,:,:1], x_real_org_warp), dim=-1) # [B, T, F+1]
+
+                f0_identic = self.model(x_filt_org, f0_org_one_hot, rr=False)
+                f0_identic_woR = self.model(torch.zeros_like(x_filt_org), f0_org_one_hot, rr=False)
+            else:
+                raise ValueError
+
+            # plot input
+            x_real_org_filt = x_real_org_filt[0].cpu().numpy()
+            x_real_org_warp = x_real_org_warp[0].cpu().numpy()
+            f0_org_one_hot = f0_org_one_hot[0].cpu().numpy()
+
+            spenv = x_real_org_filt[:, 1:]
+            dog_output = x_real_org_filt[:, :1]
+            dog_output = np.repeat(dog_output, spenv.shape[1], axis=1)
+            dog_output = dog_output.T
+            mono_spmel = x_real_org_warp.T
+            pitch_contour = f0_org_one_hot.T
+
+            min_value = np.min(np.vstack([dog_output, mono_spmel, pitch_contour]))
+            max_value = np.max(np.vstack([dog_output, mono_spmel, pitch_contour]))
+            
+            fig, (ax1,ax2,ax3) = plt.subplots(3, 1, sharex=True, figsize=(14, 10))
+            ax1.set_title('DoG output', fontsize=10)
+            ax2.set_title('Monotonic Mel-Spectrogram', fontsize=10)
+            ax3.set_title('Pitch Contour', fontsize=10)
+            _ = ax1.imshow(dog_output, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax2.imshow(mono_spmel, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax3.imshow(pitch_contour, aspect='auto', vmin=min_value, vmax=max_value)
+            plt.savefig(f'{self.sample_dir}/{self.model_name}_{self.mode}_{self.model_type}_input_{spk_id_org[0]}_{step}.png', dpi=150)
+            plt.close(fig)
+
+            # plot output
+            f0_gd_pad = f0_org_one_hot.T
+            f0_out = tensor2onehot(f0_identic)[0].cpu().numpy().T
+            f0_woR = tensor2onehot(f0_identic_woR)[0].cpu().numpy().T
+
+            min_value = np.min(np.hstack([f0_gd_pad, f0_out, f0_woR]))
+            max_value = np.max(np.hstack([f0_gd_pad, f0_out, f0_woR]))
+            
+            fig, (ax1,ax2,ax3) = plt.subplots(3, 1, sharex=True, figsize=(14, 10))
+            ax1.set_title('Original Pitch Contour', fontsize=10)
+            ax2.set_title('Output Pitch Contour', fontsize=10)
+            ax3.set_title('Output Pitch Contour Without Rhythm', fontsize=10)
+            _ = ax1.imshow(f0_gd_pad, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax2.imshow(f0_out, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax3.imshow(f0_woR, aspect='auto', vmin=min_value, vmax=max_value)
+            plt.savefig(f'{self.sample_dir}/{self.model_name}_{self.mode}_{self.model_type}_output_{spk_id_org[0]}_{step}.png', dpi=150)
             plt.close(fig)
 
         self.model = self.model.train()

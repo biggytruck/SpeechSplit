@@ -59,38 +59,38 @@ def make_spect_f0(config):
             else:
                 wav = x
             
-            # # compute spectrogram
-            # spmel = get_spmel(wav)
+            # compute spectrogram
+            spmel = get_spmel(wav)
 
-            # # compute filtered spectrogram
-            # spmel_filt = get_spmel_filt(spmel)
-
-            # # get spectral envelope
-            # spenv = get_spenv(wav, cutoff)
-            
-            # # extract f0
-            # f0_rapt, f0_norm = extract_f0(wav, fs, lo, hi)
+            # extract f0
+            f0_rapt, f0_norm = extract_f0(wav, fs, lo, hi)
 
             # use world to smooth out pitch contour
             wav_wo_f0 = removef0(wav, fs)
             
             # compute the spectrogram after f0 is removed
             spmel_smooth = get_spmel(wav_wo_f0)
-            
-            # assert len(spmel) == len(f0_rapt)
 
-            # np.save(os.path.join(wav_dir, sub_dir, os.path.splitext(filename)[0]),
-            #         wav.astype(np.float32), allow_pickle=False)     
-            # np.save(os.path.join(spmel_dir, sub_dir, os.path.splitext(filename)[0]),
-            #         spmel.astype(np.float32), allow_pickle=False) 
-            # np.save(os.path.join(spmel_filt_dir, sub_dir, os.path.splitext(filename)[0]),
-            #         spmel_filt.astype(np.float32), allow_pickle=False) 
-            # np.save(os.path.join(spenv_dir, sub_dir, os.path.splitext(filename)[0]),
-            #         spenv.astype(np.float32), allow_pickle=False) 
+            # compute filtered spectrogram
+            spmel_filt = get_spmel_filt(spmel_smooth)
+
+            # get spectral envelope
+            spenv = get_spenv(wav_wo_f0, cutoff)
+            
+            assert len(spmel) == len(f0_rapt)
+
+            np.save(os.path.join(wav_dir, sub_dir, os.path.splitext(filename)[0]),
+                    wav.astype(np.float32), allow_pickle=False)     
+            np.save(os.path.join(spmel_dir, sub_dir, os.path.splitext(filename)[0]),
+                    spmel.astype(np.float32), allow_pickle=False) 
+            np.save(os.path.join(spmel_filt_dir, sub_dir, os.path.splitext(filename)[0]),
+                    spmel_filt.astype(np.float32), allow_pickle=False) 
+            np.save(os.path.join(spenv_dir, sub_dir, os.path.splitext(filename)[0]),
+                    spenv.astype(np.float32), allow_pickle=False) 
             np.save(os.path.join(spmel_smooth_dir, sub_dir, os.path.splitext(filename)[0]),
                     spmel_smooth.astype(np.float32), allow_pickle=False) 
-            # np.save(os.path.join(f0_dir, sub_dir, os.path.splitext(filename)[0]),
-            #         f0_norm.astype(np.float32), allow_pickle=False)
+            np.save(os.path.join(f0_dir, sub_dir, os.path.splitext(filename)[0]),
+                    f0_norm.astype(np.float32), allow_pickle=False)
 
 def make_metadata(config):
     root_dir = os.path.join(config.root_dir, config.mode)

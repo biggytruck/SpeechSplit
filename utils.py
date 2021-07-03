@@ -165,7 +165,7 @@ def get_spenv(wav, cutoff=3):
 def extract_f0(wav, fs, lo, hi):
     f0_rapt = sptk.rapt(wav.astype(np.float32)*32768, fs, 256, min=lo, max=hi, otype=2)
     index_nonzero = (f0_rapt != -1e10)
-    if len(index_nonzero==0):
+    if len(index_nonzero)==0:
         mean_f0 = std_f0 = -1e10
     else:
         mean_f0, std_f0 = np.mean(f0_rapt[index_nonzero]), np.std(f0_rapt[index_nonzero])
@@ -392,3 +392,10 @@ def get_test_data_set(turk_list_fname = 'turk_list.txt', spk_list_fname = 'spk_l
                     test_data_by_ctype[curr_key].append(item)
 
     return test_data_by_ctype
+
+
+
+def tensor2onehot(x):
+
+    indices = torch.argmax(x, dim=-1)
+    return torch.nn.functional.one_hot(indices, x.size(-1))
