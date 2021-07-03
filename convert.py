@@ -1,6 +1,7 @@
 import os
 import pickle
 from collections import OrderedDict
+from librosa.core import pitch
 
 import torch
 import numpy as np
@@ -10,10 +11,23 @@ from tqdm import tqdm
 
 from model import Generator_3 as Generator
 from model import Generator_6 as F0_Converter
+# from script import Generator_6 as F0_Converter_ORI
 from config import get_config
 from wavenet import Synthesizer
 from utils import quantize_f0_numpy, inverse_quantize_f0_numpy
 
+# def get_spsp1_model():
+#     ckpt_path = '/home/biggytruck/Github/vc_workspace/SpeechSplit/whole/run3/models/spsp1/R_8_1-F-best.ckpt'
+#     ckpt = torch.load(ckpt_path, map_location=lambda storage, loc: storage)
+#     model = F0_Converter_ORI(config)
+#     try:
+#         model.load_state_dict(ckpt['model'])
+#     except:
+#         new_state_dict = OrderedDict()
+#         for k, v in ckpt['model'].items():
+#             new_state_dict[k[7:]] = v
+#         model.load_state_dict(new_state_dict)
+#     return model
 
 def load_spmel(fname):
     spmel = np.load(os.path.join(spmel_dir, fname))
@@ -42,6 +56,15 @@ def load_spenv(fname):
     
     return spenv
 
+def load_spmel_smooth(fname):
+    spmel_smooth = np.load(os.path.join(spmel_smooth_dir, fname))
+    if len(spmel_smooth)%8 != 0:
+        len_pad = 8 - (len(spmel_smooth)%8)
+        spmel_smooth = np.pad(spmel_smooth, ((0,len_pad), (0,0)), 'constant')
+    spmel_smooth = spmel_smooth[np.newaxis, :, :]
+    
+    return spmel_smooth
+
 def load_f0(fname):
     f0 = np.load(os.path.join(f0_dir, fname))
     f0 = quantize_f0_numpy(f0)[0]
@@ -59,57 +82,66 @@ def get_spk_emb(spk_id):
     return spk_emb
 
 def convert_pitch(rhythm_input, pitch_input):
-    max_len = max(rhythm_input.shape[1], pitch_input.shape[1])
-    rhythm_input = np.pad(rhythm_input, ((0,0), (0,max_len-rhythm_input.shape[1]), (0,0)), 'constant')
-    pitch_input = np.pad(pitch_input, ((0,0), (0,max_len-pitch_input.shape[1]), (0,0)), 'constant')
+    T = 192
+    rhythm_input = np.pad(rhythm_input, ((0,0), (0,T-rhythm_input.shape[1]), (0,0)), 'constant')
+    pitch_input = np.pad(pitch_input, ((0,0), (0,T-pitch_input.shape[1]), (0,0)), 'constant')
     rhythm_input = torch.from_numpy(rhythm_input).float().to(device)
     pitch_input = torch.from_numpy(pitch_input).float().to(device)
     pitch_output = F(rhythm_input, pitch_input, rr=False)
-
+    indices = torch.argmax(pitch_output, dim=-1)
+    pitch_output = torch.nn.functional.one_hot(indices, pitch_output.size(-1))
+    
     return pitch_output.cpu().numpy()
-
+    
 def convert(model_type, ctype, src_path, tgt_path, src_id, tgt_id):
     if ctype == 'R':
-        spmel = load_spmel(src_path)
         if model_type == 'spsp1':
+            spmel = load_spmel(src_path)
             spmel_filt = load_spmel(tgt_path)
         else:
+            spmel = load_spmel_smooth(src_path)
             spmel_filt = np.concatenate((load_spmel_filt(tgt_path), load_spenv(tgt_path)), axis=-1)
         f0 = load_f0(src_path)
         spk_emb = get_spk_emb(src_id)
     elif ctype == 'C':
-        spmel = load_spmel(src_path)
         if model_type == 'spsp1':
+            spmel = load_spmel(src_path)
             spmel_filt = load_spmel(tgt_path)
         else:
+            spmel = load_spmel_smooth(src_path)
             spmel_filt = np.concatenate((load_spmel_filt(tgt_path), load_spenv(tgt_path)), axis=-1)
         f0 = load_f0(src_path)
         spk_emb = get_spk_emb(src_id)
     elif ctype == 'F':
-        spmel = load_spmel(src_path)
         if model_type == 'spsp1':
+            spmel = load_spmel(src_path)
             spmel_filt = load_spmel(src_path)
         else:
+            spmel = load_spmel_smooth(src_path)
             spmel_filt = np.concatenate((load_spmel_filt(src_path), load_spenv(src_path)), axis=-1)
         f0 = load_f0(tgt_path)
         if model_type == 'spsp1':
             f0 = convert_pitch(spmel, f0)
         else:
             f0 = convert_pitch(spmel_filt, f0)
+        # spmel_unsmooth = load_spmel(src_path)
+        # f0 = convert_pitch(spmel_unsmooth, f0)
         spk_emb = get_spk_emb(src_id)
     elif ctype == 'U':
-        spmel = load_spmel(src_path)
         if model_type == 'spsp1':
+            spmel = load_spmel(src_path)
             spmel_filt = load_spmel(src_path)
         else:
+            spmel = load_spmel_smooth(src_path)
             spmel_filt = np.concatenate((load_spmel_filt(src_path), load_spenv(src_path)), axis=-1)
         f0 = load_f0(src_path)
         spk_emb = get_spk_emb(tgt_id)
     else:
-        spmel = load_spmel(src_path)
         if model_type == 'spsp1':
+            spmel = load_spmel(src_path)
             spmel_filt = load_spmel(src_path)
         else:
+            spmel = load_spmel_smooth(src_path)
             spmel_filt = np.concatenate((load_spmel_filt(src_path), load_spenv(src_path)), axis=-1)
         f0 = load_f0(src_path)
         spk_emb = get_spk_emb(src_id)
@@ -128,12 +160,14 @@ def convert(model_type, ctype, src_path, tgt_path, src_id, tgt_id):
     rhythm_input = spmel_filt[0].cpu().numpy()
     content_input = spmel_f0[0][:, :-257].cpu().numpy()
     pitch_input = spmel_f0[0][:, -257:].cpu().numpy()
+    src_pitch = load_f0(src_path)[0]
+    tgt_pitch = load_f0(tgt_path)[0]
 
     rhythm = G.rhythm(spmel_filt)
     content, pitch = G.content_pitch(spmel_f0, rr=False)
     spmel_output = G.decode(content, rhythm, pitch, spk_emb, T).cpu().numpy()[0]
 
-    return spmel_output, f0_1d, rhythm_input, content_input, pitch_input
+    return spmel_output, f0_1d, rhythm_input, content_input, pitch_input, src_pitch, tgt_pitch
 
 def draw_plot(images, names, plot_path):
     assert len(images) == len(names), 'Length of images must be equal to length of names'
@@ -157,6 +191,7 @@ if __name__ == '__main__':
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     config = get_config()
+    # F = get_spsp1_model().eval().to(device)
     config.mode = 'test'
 
     root_dir = config.root_dir
@@ -164,6 +199,7 @@ if __name__ == '__main__':
     spmel_dir = os.path.join(root_dir, config.mode, config.spmel_dir)
     spmel_filt_dir = os.path.join(root_dir, config.mode, config.spmel_filt_dir)
     spenv_dir = os.path.join(root_dir, config.mode, config.spenv_dir+str(config.cutoff))
+    spmel_smooth_dir = os.path.join(root_dir, config.mode, config.spmel_smooth_dir)
     f0_dir = os.path.join(root_dir, config.mode, config.f0_dir)
 
     model_save_dir = os.path.join(root_dir, config.model_save_dir)
@@ -252,7 +288,7 @@ if __name__ == '__main__':
                         write(tgt_save_path, tgt_wav, fs)
 
                         cvt_spmel_path = os.path.join(result_path, fname+'_c.wav')
-                        cvt_spmel, tgt_f0, rhythm_input, content_input, pitch_input = convert(model_type, ctype, src_name+'.npy', tgt_name+'.npy', src_id, tgt_id)
+                        cvt_spmel, tgt_f0, rhythm_input, content_input, pitch_input, src_pitch, tgt_pitch = convert(model_type, ctype, src_name+'.npy', tgt_name+'.npy', src_id, tgt_id)
                         spmel_list.append(torch.from_numpy(cvt_spmel))
                         spmel_path_list.append(cvt_spmel_path)
 
@@ -263,8 +299,8 @@ if __name__ == '__main__':
                             os.makedirs(os.path.join(plot_dir, model_type, model_name, ctype))
 
                         # plot input
-                        images = [rhythm_input, content_input, pitch_input]
-                        names = ['Rhythm Input', 'Content Input', 'Pitch Input']
+                        images = [rhythm_input, content_input, pitch_input, src_pitch, tgt_pitch]
+                        names = ['Rhythm Input', 'Content Input', 'Pitch Input', 'Source Pitch', 'Target Pitch']
                         plot_path = os.path.join(plot_dir, model_type, model_name, ctype, fname+'_input.png')
                         draw_plot(images, names, plot_path)
 
