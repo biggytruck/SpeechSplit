@@ -166,7 +166,7 @@ class Encoder_7(nn.Module):
                          kernel_size=5, stride=1,
                          padding=2,
                          dilation=1, w_init_gain='relu'),
-                nn.GroupNorm(self.dim_enc//self.chs_grp, self.dim_enc))
+                nn.InstanceNorm1d(self.dim_enc, affine=False, track_running_stats=False))
             convolutions.append(conv_layer)
         self.convolutions_1 = nn.ModuleList(convolutions)
         
