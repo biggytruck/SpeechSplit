@@ -571,11 +571,13 @@ class Solver(object):
             if self.experiment == 'spsp1':
                 f0_identic = self.model(x_real_org, f0_org_one_hot, rr=False)
                 f0_identic_woR = self.model(torch.zeros_like(x_real_org), f0_org_one_hot, rr=False)
+                f0_identic_woF = self.model(x_real_org, torch.zeros_like(f0_org_one_hot), rr=False)
             elif self.experiment == 'spsp2':
                 x_filt_org = torch.cat((x_real_org_filt[:,:,:1], x_real_org_warp), dim=-1) # [B, T, F+1]
 
                 f0_identic = self.model(x_filt_org, f0_org_one_hot, rr=False)
                 f0_identic_woR = self.model(torch.zeros_like(x_filt_org), f0_org_one_hot, rr=False)
+                f0_identic_woF = self.model(x_filt_org, torch.zeros_like(f0_org_one_hot), rr=False)
             else:
                 raise ValueError
 
@@ -608,17 +610,20 @@ class Solver(object):
             f0_gd_pad = f0_org_one_hot.T
             f0_out = tensor2onehot(f0_identic)[0].cpu().numpy().T
             f0_woR = tensor2onehot(f0_identic_woR)[0].cpu().numpy().T
+            f0_woF = tensor2onehot(f0_identic_woF)[0].cpu().numpy().T
 
-            min_value = np.min(np.hstack([f0_gd_pad, f0_out, f0_woR]))
-            max_value = np.max(np.hstack([f0_gd_pad, f0_out, f0_woR]))
+            min_value = np.min(np.hstack([f0_gd_pad, f0_out, f0_woR, f0_woF]))
+            max_value = np.max(np.hstack([f0_gd_pad, f0_out, f0_woR, f0_woF]))
             
-            fig, (ax1,ax2,ax3) = plt.subplots(3, 1, sharex=True, figsize=(14, 10))
+            fig, (ax1,ax2,ax3,ax4) = plt.subplots(4, 1, sharex=True, figsize=(14, 10))
             ax1.set_title('Original Pitch Contour', fontsize=10)
             ax2.set_title('Output Pitch Contour', fontsize=10)
             ax3.set_title('Output Pitch Contour Without Rhythm', fontsize=10)
+            ax4.set_title('Output Pitch Contour Without Pitch', fontsize=10)
             _ = ax1.imshow(f0_gd_pad, aspect='auto', vmin=min_value, vmax=max_value)
             _ = ax2.imshow(f0_out, aspect='auto', vmin=min_value, vmax=max_value)
             _ = ax3.imshow(f0_woR, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax4.imshow(f0_woF, aspect='auto', vmin=min_value, vmax=max_value)
             plt.savefig(f'{self.sample_dir}/{self.model_name}_{self.mode}_{self.model_type}_output_{spk_id_org[0]}_{step}.png', dpi=150)
             plt.close(fig)
 

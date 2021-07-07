@@ -140,7 +140,7 @@ cython_debug/
 # assets
 assets/
 results/
-run/
+run*/
 eval/
 train/
 test/

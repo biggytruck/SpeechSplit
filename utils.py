@@ -328,12 +328,24 @@ def removef0(x, fs=16000):
     f0 = pw.stonemask(x, _f0, t, fs)  # pitch refinement
     sp = pw.cheaptrick(x, f0, t, fs)  # extract smoothed spectrogram
     ap = pw.d4c(x, f0, t, fs)         # extract aperiodicity
-    v = (f0>0)
-    uv = (f0<=0)
-    f0 = np.ones_like(f0) * np.mean(f0[v])
-    f0[uv] = 0
+    new_f0 = np.zeros_like(f0)
+    start_idx = 0
+    trunk_len = 600
+    while start_idx*trunk_len < len(f0):
+        f0_trunk = f0[start_idx*trunk_len:(start_idx+1)*trunk_len]
+        v = (f0_trunk>0)
+        uv = (f0_trunk<=0)
+        if any(v):
+            f0_trunk = np.ones_like(f0_trunk) * np.mean(f0_trunk[v])
+            f0_trunk[uv] = 0
+            alpha = choice([np.random.uniform(0.33, 0.5), np.random.uniform(2, 3)])
+            f0_trunk *= alpha
+        else:
+            f0_trunk *= 0
+        new_f0[start_idx*trunk_len:(start_idx+1)*trunk_len] = f0_trunk
+        start_idx += 1
 
-    y = pw.synthesize(f0, sp, ap, fs) # synthesize an utterance using the parameters
+    y = pw.synthesize(new_f0, sp, ap, fs) # synthesize an utterance using the parameters
     if len(y)<len(x):
         y = np.pad(y, (len(x)-len(y), 0))
     assert len(y) >= len(x)
