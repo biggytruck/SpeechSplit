@@ -323,27 +323,38 @@ def get_spmel_filt(spmel):
     return spmel_filt
 
 
-def removef0(x, fs=16000):
+def removef0(x, fs=16000, random_warping=True):
     _f0, t = pw.dio(x, fs)    # raw pitch extractor
     f0 = pw.stonemask(x, _f0, t, fs)  # pitch refinement
     sp = pw.cheaptrick(x, f0, t, fs)  # extract smoothed spectrogram
     ap = pw.d4c(x, f0, t, fs)         # extract aperiodicity
-    new_f0 = np.zeros_like(f0)
-    start_idx = 0
-    trunk_len = 600
-    while start_idx*trunk_len < len(f0):
-        f0_trunk = f0[start_idx*trunk_len:(start_idx+1)*trunk_len]
-        v = (f0_trunk>0)
-        uv = (f0_trunk<=0)
+
+    if random_warping:
+        new_f0 = np.zeros_like(f0)
+        start_idx = 0
+        trunk_len = 600
+        while start_idx*trunk_len < len(f0):
+            f0_trunk = f0[start_idx*trunk_len:(start_idx+1)*trunk_len]
+            v = (f0_trunk>0)
+            uv = (f0_trunk<=0)
+            if any(v):
+                f0_trunk = np.ones_like(f0_trunk) * np.mean(f0_trunk[v])
+                f0_trunk[uv] = 0
+                alpha = choice([np.random.uniform(0.33, 0.5), np.random.uniform(2, 3)])
+                f0_trunk *= alpha
+            else:
+                f0_trunk *= 0
+            new_f0[start_idx*trunk_len:(start_idx+1)*trunk_len] = f0_trunk
+            start_idx += 1
+    else:
+        new_f0 = f0
+        v = (new_f0>0)
+        uv = (new_f0<=0)
         if any(v):
-            f0_trunk = np.ones_like(f0_trunk) * np.mean(f0_trunk[v])
-            f0_trunk[uv] = 0
-            alpha = choice([np.random.uniform(0.33, 0.5), np.random.uniform(2, 3)])
-            f0_trunk *= alpha
+            new_f0 = np.ones_like(new_f0) * np.mean(new_f0[v])
+            new_f0[uv] = 0
         else:
-            f0_trunk *= 0
-        new_f0[start_idx*trunk_len:(start_idx+1)*trunk_len] = f0_trunk
-        start_idx += 1
+            new_f0 *= 0
 
     y = pw.synthesize(new_f0, sp, ap, fs) # synthesize an utterance using the parameters
     if len(y)<len(x):

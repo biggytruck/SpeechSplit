@@ -123,7 +123,8 @@ def convert(model_type, ctype, src_path, tgt_path, src_id, tgt_id):
         if model_type == 'spsp1':
             f0 = convert_pitch(spmel, f0)
         else:
-            f0 = convert_pitch(spmel_filt, f0)
+            spmel_smooth = np.concatenate((load_spmel_filt(src_path), load_spmel(src_path)), axis=-1)
+            f0 = convert_pitch(spmel_smooth, f0)
         # spmel_unsmooth = load_spmel(src_path)
         # f0 = convert_pitch(spmel_unsmooth, f0)
         spk_emb = get_spk_emb(src_id)
