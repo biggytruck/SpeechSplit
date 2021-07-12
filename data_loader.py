@@ -2,13 +2,11 @@ import os
 import torch
 import pickle  
 import numpy as np
-from random import choice
 
 from torch.utils import data
 from torch.utils.data.sampler import Sampler
-from torchaudio.sox_effects import apply_effects_tensor
 
-from utils import get_spmel, get_spenv
+from utils import quantize_f0_torch
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -21,47 +19,56 @@ class Utterances(data.Dataset):
         self.wav_dir = os.path.join(self.root_dir, config.wav_dir)
         self.spmel_dir = os.path.join(self.root_dir, config.spmel_dir)
         self.spmel_filt_dir = os.path.join(self.root_dir, config.spmel_filt_dir)
-        self.spenv_dir = os.path.join(self.root_dir, config.spenv_dir+str(config.cutoff))
-        self.spmel_smooth_dir = os.path.join(self.root_dir, config.spmel_smooth_dir)
+        self.spenv_dir = os.path.join(self.root_dir, config.spenv_dir)
+        self.spmel_mono_dir = os.path.join(self.root_dir, config.spmel_mono_dir)
         self.f0_dir = os.path.join(self.root_dir, config.f0_dir)
+        self.experiment = config.experiment
+        self.model_type = config.model_type
         self.mode = config.mode
-        self.step = 300
-        print('Currently processing {} dataset'.format(config.mode))
+        print('Currently processing {} dataset'.format(self.mode))
 
         metaname = os.path.join(self.root_dir, 'dataset.pkl')
-        meta = pickle.load(open(metaname, "rb"))
+        metadata = pickle.load(open(metaname, "rb"))
         
-        dataset = [None] * len(meta)
-        self.load_data(meta, dataset, 0)
+        dataset = [None] * len(metadata)
+        self.load_data(metadata, dataset)
         self.dataset = list(dataset)
         self.num_tokens = len(self.dataset)
 
-    def load_data(self, submeta, dataset, idx_offset):  
-        for k, sbmt in enumerate(submeta):    
+    def load_data(self, metadata, dataset):  
+        for k, sbmt in enumerate(metadata):    
             uttrs = len(sbmt)*[None]
             # fill in speaker id and embedding
             uttrs[0] = sbmt[0]
             uttrs[1] = sbmt[1]
             # fill in data
-            wav_tmp = np.load(os.path.join(self.wav_dir, sbmt[2])) 
-            sp_tmp = np.load(os.path.join(self.spmel_dir, sbmt[2]))
-            sp_filt_tmp = np.load(os.path.join(self.spmel_filt_dir, sbmt[2]))
-            spenv_tmp = np.load(os.path.join(self.spenv_dir, sbmt[2]))
-            sp_smooth_tmp = np.load(os.path.join(self.spmel_smooth_dir, sbmt[2]))
-            f0_tmp = np.load(os.path.join(self.f0_dir, sbmt[2]))
-            uttrs[2] = ( wav_tmp, sp_tmp, sp_filt_tmp, spenv_tmp, sp_smooth_tmp, f0_tmp )
-            dataset[idx_offset+k] = uttrs  
+            wav = np.load(os.path.join(self.wav_dir, sbmt[2])) 
+            spmel = np.load(os.path.join(self.spmel_dir, sbmt[2]))
+            spmel_filt = np.load(os.path.join(self.spmel_filt_dir, sbmt[2]))
+            spmel_mono = np.load(os.path.join(self.spmel_mono_dir, sbmt[2]))
+            spenv = np.load(os.path.join(self.spenv_dir, sbmt[2]))
+            f0 = np.load(os.path.join(self.f0_dir, sbmt[2]))
+            uttrs[2] = ( wav, spmel, spmel_filt, spenv, spmel_mono, f0 )
+            dataset[k] = uttrs  
         
 
     def __getitem__(self, index):
         list_uttrs = self.dataset[index]
         spk_id_org = list_uttrs[0]
         emb_org = list_uttrs[1]
-        wav_tmp, melsp, melsp_filt, melse, melsp_smooth, f0_org = list_uttrs[2]
-        melsp_R = np.hstack((melsp_filt, melse))
-        melsp_C = melsp_smooth
+        wav, spmel, spmel_filt, spenv, spmel_mono, f0 = list_uttrs[2]
+        if self.experiment == 'spsp1':
+            rhythm_input = spmel
+            content_input = spmel
+            pitch_input = f0
+            timbre_input = emb_org
+        else:
+            rhythm_input = spenv if self.model_type == 'G' else spmel_mono
+            content_input = spmel_mono
+            pitch_input = f0
+            timbre_input = emb_org
         
-        return wav_tmp, spk_id_org, melsp, melsp_R, melsp_C, emb_org, f0_org
+        return wav, spk_id_org, spmel, rhythm_input, content_input, pitch_input, timbre_input
     
 
     def __len__(self):
@@ -81,38 +88,38 @@ class Collator(object):
         new_batch = []
         for token in batch:
 
-            wav_tmp, spk_id_org, melsp, melsp_R, melsp_C, emb_org, f0_org = token
+            wav, spk_id_org, spmel_gt, rhythm_input, content_input, pitch_input, timbre_input = token
             len_crop = np.random.randint(self.min_len_seq, self.max_len_seq+1) if self.mode == 'train' else  self.max_len_pad # 1.5s ~ 3s
-            left = np.random.randint(0, len(melsp)-len_crop) if self.mode == 'train' else 0
+            left = np.random.randint(0, len(spmel_gt)-len_crop) if self.mode == 'train' else 0
 
-            melsp = melsp[left:left+len_crop, :] # [Lc, F]
-            melsp_R = melsp_R[left:left+len_crop, :] # [Lc, F]
-            melsp_C = melsp_C[left:left+len_crop, :] # [Lc, F]
-            f0_org = f0_org[left:left+len_crop] # [Lc, ]
+            spmel_gt = spmel_gt[left:left+len_crop, :] # [Lc, F]
+            rhythm_input = rhythm_input[left:left+len_crop, :] # [Lc, F]
+            content_input = content_input[left:left+len_crop, :] # [Lc, F]
+            pitch_input = pitch_input[left:left+len_crop] # [Lc, ]
             
-            melsp = np.clip(melsp, 0, 1)
-            melsp_R = np.clip(melsp_R, 0, 1)
-            melsp_C = np.clip(melsp_C, 0, 1)
+            spmel_gt = np.clip(spmel_gt, 0, 1)
+            rhythm_input = np.clip(rhythm_input, 0, 1)
+            content_input = np.clip(content_input, 0, 1)
             
-            melsp_pad = np.pad(melsp, ((0,self.max_len_pad-melsp.shape[0]),(0,0)), 'constant')
-            melsp_R_pad = np.pad(melsp_R, ((0,self.max_len_pad-melsp_R.shape[0]),(0,0)), 'constant')
-            melsp_C_pad = np.pad(melsp_C, ((0,self.max_len_pad-melsp_C.shape[0]),(0,0)), 'constant')
-            f0_org_pad = np.pad(f0_org[:,np.newaxis], ((0,self.max_len_pad-f0_org.shape[0]),(0,0)), 'constant', constant_values=-1e10)
+            spmel_gt = np.pad(spmel_gt, ((0,self.max_len_pad-spmel_gt.shape[0]),(0,0)), 'constant')
+            rhythm_input = np.pad(rhythm_input, ((0,self.max_len_pad-rhythm_input.shape[0]),(0,0)), 'constant')
+            content_input = np.pad(content_input, ((0,self.max_len_pad-content_input.shape[0]),(0,0)), 'constant')
+            pitch_input = np.pad(pitch_input[:,np.newaxis], ((0,self.max_len_pad-pitch_input.shape[0]),(0,0)), 'constant', constant_values=-1e10)
             
-            new_batch.append( (spk_id_org, melsp_pad, melsp_R_pad, melsp_C_pad, emb_org, f0_org_pad, len_crop) ) 
+            new_batch.append( (spk_id_org, spmel_gt, rhythm_input, content_input, pitch_input, timbre_input, len_crop) ) 
             
         batch = new_batch  
         
-        spk_id_org, melsp_pad, melsp_R_pad, melsp_C_pad, emb_org, f0_org_pad, len_crop = zip(*batch)
+        spk_id_org, spmel_gt, rhythm_input, content_input, pitch_input, timbre_input, len_crop = zip(*batch)
         spk_id_org = list(spk_id_org)
-        melsp = torch.FloatTensor(np.stack(melsp_pad, axis=0))
-        melsp_R = torch.FloatTensor(np.stack(melsp_R_pad, axis=0))
-        melsp_C = torch.FloatTensor(np.stack(melsp_C_pad, axis=0))
-        spk_emb = torch.FloatTensor(np.stack(emb_org, axis=0))
-        pitch = torch.FloatTensor(np.stack(f0_org_pad, axis=0))
-        len_org = torch.LongTensor(np.stack(len_crop, axis=0))
+        spmel_gt = torch.FloatTensor(np.stack(spmel_gt, axis=0))
+        rhythm_input = torch.FloatTensor(np.stack(rhythm_input, axis=0))
+        content_input = torch.FloatTensor(np.stack(content_input, axis=0))
+        pitch_input = torch.FloatTensor(np.stack(pitch_input, axis=0))
+        timbre_input = torch.FloatTensor(np.stack(timbre_input, axis=0))
+        len_crop = torch.LongTensor(np.stack(len_crop, axis=0))
         
-        return spk_id_org, melsp, melsp_R, melsp_C, spk_emb, pitch, len_org
+        return spk_id_org, spmel_gt, rhythm_input, content_input, pitch_input, timbre_input, len_crop
     
 
     

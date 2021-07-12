@@ -11,17 +11,6 @@ def main(config):
     # For fast training.
     cudnn.benchmark = True
 
-    # Create directories if not exist.
-    log_dir = os.path.join(config.root_dir, config.log_dir)
-    model_save_dir = os.path.join(config.root_dir, config.model_save_dir)
-    sample_dir = os.path.join(config.root_dir, config.sample_dir)
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    if not os.path.exists(model_save_dir):
-        os.makedirs(model_save_dir)
-    if not os.path.exists(sample_dir):
-        os.makedirs(sample_dir)
-
     # Data preprocessing(optional).
     if config.make_spect_f0:
         make_spect_f0(config)
@@ -41,15 +30,13 @@ def main(config):
         # Bottleneck size settings
         settings = {
                     # 'R_8_1': [8,8,8,8,1,32],
-                    # 'R_1_1': [8,1,8,8,1,32],
-                    # 'R_8_32': [8,8,8,8,32,32],
                     'R_1_32': [1,1,1,32,32,32],
         }
 
         # G or F
         model_types = [
             'G',
-            'F'
+            # 'F'
         ]
 
 

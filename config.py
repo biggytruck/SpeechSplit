@@ -14,24 +14,23 @@ def get_config():
     parser.add_argument('--spmel_dir', type=str, default='spmel')
     parser.add_argument('--spmel_filt_dir', type=str, default='spmel_filt')
     parser.add_argument('--spenv_dir', type=str, default='spenv')
-    parser.add_argument('--spmel_smooth_dir', type=str, default='spmel_smooth')
+    parser.add_argument('--spmel_mono_dir', type=str, default='spmel_mono')
     parser.add_argument('--f0_dir', type=str, default='f0')
     parser.add_argument('--txt_dir', type=str, default='txt')
     parser.add_argument('--result_dir', type=str, default='result')
     parser.add_argument('--plot_dir', type=str, default='plot')
-    parser.add_argument('--log_dir', type=str, default='run3/logs/')
-    parser.add_argument('--model_save_dir', type=str, default='run3/models/')
-    parser.add_argument('--sample_dir', type=str, default='run3/samples/')
+    parser.add_argument('--log_dir', type=str, default='run/logs')
+    parser.add_argument('--model_save_dir', type=str, default='run/models')
+    parser.add_argument('--sample_dir', type=str, default='run/samples')
     parser.add_argument('--experiment', type=str, default='spsp2')
 
     # Data Preprocessing
     parser.add_argument('--make_metadata', type=str2bool, default=False)
     parser.add_argument('--make_spect_f0', type=str2bool, default=False)
     parser.add_argument('--run_model', type=str2bool, default=True)
-    parser.add_argument('--cutoff', type=int, default=3)
 
     # Dataloader
-    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--mode', type=str, default='train')
     parser.add_argument('--shuffle', type=str2bool, default=True)
     parser.add_argument('--num_workers', type=int, default=16)
@@ -61,8 +60,8 @@ def get_config():
     parser.add_argument('--dropout', type=float, default=0.2)
 
     # Training configuration.
-    parser.add_argument('--num_iters', type=int, default=400000, help='number of total iterations')
-    parser.add_argument('--lr', type=float, default=5e-4, help='learning rate')
+    parser.add_argument('--num_iters', type=int, default=800000, help='number of total iterations')
+    parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
     parser.add_argument('--beta1', type=float, default=0.9, help='beta1 for Adam optimizer')
     parser.add_argument('--beta2', type=float, default=0.999, help='beta2 for Adam optimizer')
     parser.add_argument('--resume_iters', type=int, default=None, help='resume training from this step')
@@ -75,9 +74,10 @@ def get_config():
     parser.add_argument('--device_id', type=int, default=0)
 
     # Step size.
-    parser.add_argument('--log_step', type=int, default=100)
-    parser.add_argument('--sample_step', type=int, default=40000)
-    parser.add_argument('--model_save_step', type=int, default=20000)
+    parser.add_argument('--log_step', type=int, default=1000)
+    parser.add_argument('--sample_step', type=int, default=100000)
+    parser.add_argument('--model_save_step', type=int, default=1000)
+    parser.add_argument('--ckpt_save_step', type=int, default=100000)
 
     config = parser.parse_args()
 

@@ -11,10 +11,9 @@ from scipy import signal
 from librosa.filters import mel
 from librosa.core import resample
 from librosa.util import fix_length
-from scipy.signal import get_window, medfilt2d
+from scipy.signal import get_window
 from math import pi, sqrt, exp
 import pyworld as pw
-from soundfile import write
 
 
 mel_basis = mel(16000, 1024, fmin=90, fmax=7600, n_mels=80).T
@@ -279,27 +278,6 @@ def make_filt_spect(S, n=31):
     return S_filt.T
 
 
-def spectral_subtraction(S, Tn=0.25, alpha=0.35, med=3, fs=16000):
-    S_noise = S[:int(Tn*fs)]
-    rep = len(S) // len(S_noise)
-    res = len(S) % len(S_noise)
-    S_noise_rp = np.tile(S_noise, (rep, 1))
-    S_noise_rp = np.vstack((S_noise, S_noise[:res]))
-
-    pha = np.angle(S)
-    diff = np.abs(S) - alpha * np.abs(S_noise_rp)
-    diff[diff<0] = 0
-    S_subt = diff * np.exp(1j*pha)
-
-    if med:
-        pha = np.angle(S_subt)
-        mag = np.abs(S_subt)
-        mag = medfilt2d(mag, med)
-        S_subt = mag * np.exp(1j*pha)
-
-    return np.abs(S_subt)
-
-
 def zero_one_norm(S):
     S_norm = S - np.min(S)
     S_norm /= np.max(S_norm)
@@ -321,6 +299,63 @@ def get_spmel_filt(spmel):
     spmel_filt = zero_one_norm(spmel_filt)
     spmel_filt = spmel_filt[:, :1]
     return spmel_filt
+
+
+def get_world_params(x, fs=16000):
+    _f0, t = pw.dio(x, fs)            # raw pitch extractor
+    f0 = pw.stonemask(x, _f0, t, fs)  # pitch refinement
+    sp = pw.cheaptrick(x, f0, t, fs)  # extract smoothed spectrogram
+    ap = pw.d4c(x, f0, t, fs)         # extract aperiodicity
+
+    return f0, sp, ap
+
+
+def average_f0s(f0s, mode='global'):
+    # average f0s using global mean
+    if mode == 'global':
+        f0_voiced = [] # f0 in voiced frames
+        for f0 in f0s:
+            v = (f0>0)
+            f0_voiced = np.concatenate((f0_voiced, f0[v]))
+        f0_avg = np.mean(f0_voiced)
+        for i in range(len(f0s)):
+            f0 = f0s[i]
+            v = (f0>0)
+            uv = (f0<=0)
+            if any(v):
+                f0 = np.ones_like(f0) * f0_avg
+                f0[uv] = 0
+            else:
+                f0 =  np.zeros_like(f0)
+            f0s[i] = f0
+
+    # average f0s using local mean
+    elif mode == 'local':
+        for i in range(len(f0s)):
+            f0 = f0s[i]
+            v = (f0>0)
+            uv = (f0<=0)
+            if any(v):
+                f0_avg = np.mean(f0[v])
+                f0 = np.ones_like(f0) * f0_avg
+                f0[uv] = 0
+            else:
+                f0 =  np.zeros_like(f0)
+            f0s[i] = f0
+
+    else:
+        raise ValueError
+
+    return f0s
+
+
+def get_monotonic_wav(x, f0, sp, ap, fs=16000):
+    y = pw.synthesize(f0, sp, ap, fs) # synthesize an utterance using the parameters
+    if len(y)<len(x):
+        y = np.pad(y, (0, len(x)-len(y)))
+    assert len(y) >= len(x)
+    return y[:len(x)]
+
 
 
 def removef0(x, fs=16000, random_warping=True):

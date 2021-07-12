@@ -34,7 +34,6 @@ class Solver(object):
         self.beta2 = self.config.beta2
         self.resume_iters = self.config.resume_iters
         self.mode = self.config.mode
-        self.cutoff = self.config.cutoff
         
         # Miscellaneous.
         self.experiment = self.config.experiment
@@ -59,6 +58,7 @@ class Solver(object):
         self.log_step = self.config.log_step
         self.sample_step = self.config.sample_step
         self.model_save_step = self.config.model_save_step
+        self.ckpt_save_step = self.config.ckpt_save_step
         
         # Build the model and tensorboard.
         self.build_model()
@@ -69,7 +69,6 @@ class Solver(object):
         self.min_loss_step = 0
         self.min_loss = float('inf')
 
-            
     def build_model(self):        
         self.model = Generator(self.config) if self.model_type == 'G' else F_Converter(self.config)
         self.print_network(self.model, self.model_type)
@@ -81,8 +80,6 @@ class Solver(object):
         self.Interp = InterpLnr(self.config)
         self.optimizer = torch.optim.Adam(self.model.parameters(), self.lr, [self.beta1, self.beta2], weight_decay=1e-6)
         self.Interp.to(self.device)
-
-        self.scheduler = STLR(self.optimizer, num_iters=self.num_iters, cut_frac=0.1, ratio=32)
 
         
     def print_network(self, model, name):
@@ -123,7 +120,6 @@ class Solver(object):
                     new_state_dict[k[7:]] = v
                 self.model.load_state_dict(new_state_dict)
             self.optimizer.load_state_dict(ckpt['optimizer'])
-            self.scheduler.load_state_dict(ckpt['scheduler'])
             self.lr = self.optimizer.param_groups[0]['lr']
         
         
@@ -136,11 +132,11 @@ class Solver(object):
     def reload_data_loader(self, data_loader):
         self.data_loader = data_loader
         self.data_iter = iter(self.data_loader)
-        
-                
+
+
     def train(self):
         if self.num_iters == 1:
-            ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}-best.ckpt'.format(self.model_name, self.model_type, self.cutoff))
+            ckpt_path = os.path.join(self.model_save_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
             torch.save({'model': self.model.state_dict()}, ckpt_path)
             return
 
@@ -169,60 +165,55 @@ class Solver(object):
 
             # Load data
             try:
-                _, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
+                _, spmel_gt, rhythm_input, content_input, pitch_input, timbre_input, len_crop = next(self.data_iter)
             except:
                 self.data_iter = iter(self.data_loader)
-                _, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
+                _, spmel_gt, rhythm_input, content_input, pitch_input, timbre_input, len_crop = next(self.data_iter)
             
-            x_real_org = x_real_org.to(self.device)
-            x_real_org_filt = x_real_org_filt.to(self.device)
-            x_real_org_warp = x_real_org_warp.to(self.device)
-            emb_org = emb_org.to(self.device)
-            len_org = len_org.to(self.device)
-            f0_org = f0_org.to(self.device)
-                
+            spmel_gt = spmel_gt.to(self.device)
+            rhythm_input = rhythm_input.to(self.device)
+            content_input = content_input.to(self.device)
+            pitch_input = pitch_input.to(self.device)
+            timbre_input = timbre_input.to(self.device)
+            len_crop = len_crop.to(self.device)
+
             # =================================================================================== #
-            #                              2. Train the generator                                 #
+            #                              2. Train the model                                     #
             # =================================================================================== #
 
-            # Identity mapping loss
-            x_f0 = torch.cat((x_real_org_warp, f0_org), dim=-1) # [B, T, F+1]
-            x_filt_org = torch.cat((x_real_org_filt[:,:,:1], x_real_org_warp), dim=-1) # [B, T, F+1]
-            x_f0_intrp = self.Interp(x_f0, len_org) # [B, T, F+1]
-            f0_org_intrp = quantize_f0_torch(x_f0_intrp[:,:,-1])[0] # [B, T, 257]
-            x_f0_intrp_org = torch.cat((x_f0_intrp[:,:,:-1], f0_org_intrp), dim=-1) # [B, T, F+257]
-            
-            if self.experiment == 'spsp1':
-                if self.model_type == 'G':
-                    x_identic = self.model(x_f0_intrp_org, x_real_org, emb_org)
-                    loss_id = F.mse_loss(x_identic, x_real_org) 
-                else:
-                    x_identic = self.model(x_real_org, f0_org_intrp).view(-1, self.config.dim_f0)
-                    f0_org_quantized = quantize_f0_torch(f0_org)[1].view(-1)
-                    loss_id = F.cross_entropy(x_identic, f0_org_quantized)
-            elif self.experiment == 'spsp2':
-                if self.model_type == 'G':
-                    x_identic = self.model(x_f0_intrp_org, x_real_org_filt, emb_org)
-                    loss_id = F.mse_loss(x_identic, x_real_org) 
-                else:
-                    x_identic = self.model(x_filt_org, f0_org_intrp).view(-1, self.config.dim_f0)
-                    f0_org_quantized = quantize_f0_torch(f0_org)[1].view(-1)
-                    loss_id = F.cross_entropy(x_identic, f0_org_quantized)
+            if self.model_type == 'G':
+                # Prepare input data and apply random resampling
+                content_pitch_input = torch.cat((content_input, pitch_input), dim=-1) # [B, T, F+1]
+                content_pitch_input_intrp = self.Interp(content_pitch_input, len_crop) # [B, T, F+1]
+                pitch_input_intrp = quantize_f0_torch(content_pitch_input_intrp[:, :, -1])[0] # [B, T, 257]
+                content_pitch_input_intrp = torch.cat((content_pitch_input_intrp[:,:,:-1], pitch_input_intrp), dim=-1) # [B, T, F+257]
+
+                # Identity mapping loss
+                spmel_output = self.model(content_pitch_input_intrp, rhythm_input, timbre_input)
+                loss_id = F.mse_loss(spmel_output, spmel_gt)
+            elif self.model_type == 'F':
+                # Prepare input data and apply random resampling
+                pitch_gt = quantize_f0_torch(pitch_input)[1].view(-1)
+                pitch_input_intrp = self.Interp(pitch_input, len_crop) # [B, T, 1]
+                pitch_input_intrp = quantize_f0_torch(pitch_input_intrp)[0] # [B, T, 257]
+
+                # Cross entropy loss
+                pitch_output = self.model(rhythm_input, pitch_input_intrp).view(-1, self.config.dim_f0)
+                loss_id = F.cross_entropy(pitch_output, pitch_gt)
             else:
                 raise ValueError
-           
+
             # Backward and optimize.
             loss = loss_id
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-            self.scheduler.step()
 
             # Logging.
             train_loss_id = loss_id.item()
 
             # =================================================================================== #
-            #                           3. Logging and saveing checkpoints                        #
+            #                           3. Logging and saving checkpoints                         #
             # =================================================================================== #
 
             # Print out training information.
@@ -242,24 +233,23 @@ class Solver(object):
                 else:
                     self.plot_F(i+1)
     
-            # Save model checkpoints and the best one if possible
-            if (i+1) % self.model_save_step == 0:
-                ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}-{}.ckpt'.format(self.model_name, self.model_type, self.cutoff, i+1))
+            # Save model checkpoints
+            if (i+1) % self.ckpt_save_step == 0:
+                ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}.ckpt'.format(self.model_name, self.model_type, i+1))
                 torch.save({'model': self.model.state_dict(),
-                            'optimizer': self.optimizer.state_dict(),
-                            'scheduler': self.scheduler.state_dict()}, ckpt_path)
-
+                            'optimizer': self.optimizer.state_dict()}, ckpt_path)
                 print('Saved model checkpoints into {}...'.format(self.model_save_dir))
-
                 if self.use_tensorboard:
                     self.writer.add_scalar(f'{self.model_type}/train_loss_id', train_loss_id, i+1)
-                
-                # current use training loss to find best model
+
+            # Save the best model if possible
+            if (i+1) % self.model_save_step == 0:
+                # currently use training loss to find best model
                 # may change to validation loss for better generalization but need to do train-val split
                 if train_loss_id < self.min_loss:
                     self.min_loss = train_loss_id
                     self.min_loss_step = i+1
-                    ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}-best.ckpt'.format(self.model_name, self.model_type, self.cutoff))
+                    ckpt_path = os.path.join(self.model_save_dir, '{}-{}-best.ckpt'.format(self.model_name, self.model_type))
                     torch.save({'model': self.model.state_dict()}, ckpt_path)
                     print('Best checkpoint so far: Iteration {}, Training loss: {}'.format(self.min_loss_step, 
                                                                                            self.min_loss))
@@ -296,45 +286,41 @@ class Solver(object):
                 #                             1. Preprocess input data                                #
                 # =================================================================================== #
 
-                # Fetch real images and labels.
+                # Load data
                 try:
-                    _, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
+                    _, spmel_gt, rhythm_input, content_input, pitch_input, timbre_input, len_crop = next(self.data_iter)
                 except:
                     break
                 
-                batch_size = len(x_real_org)
-                x_real_org = x_real_org.to(self.device)
-                x_real_org_filt = x_real_org_filt.to(self.device)
-                x_real_org_warp = x_real_org_warp.to(self.device)
-                emb_org = emb_org.to(self.device)
-                len_org = len_org.to(self.device)
-                f0_org = f0_org.to(self.device)
+                batch_size = len(spmel_gt)
+                spmel_gt = spmel_gt.to(self.device)
+                rhythm_input = rhythm_input.to(self.device)
+                content_input = content_input.to(self.device)
+                pitch_input = pitch_input.to(self.device)
+                timbre_input = timbre_input.to(self.device)
+                len_crop = len_crop.to(self.device)
                 
                 # =================================================================================== #
-                #                             2. Test the generator                                   #
+                #                              2. Test the model                                      #
                 # =================================================================================== #
-                            
-                # Identity mapping loss
-                x_filt_org = torch.cat((x_real_org_filt[:,:,:1], x_real_org_warp), dim=-1) # [B, T, F+1]
-                f0_org_one_hot, f0_org_quantized = quantize_f0_torch(f0_org) # [B, T, 257], [B, T, 1]
-                x_f0 = torch.cat((x_real_org_warp, f0_org_one_hot), dim=-1) # [B, T, F+257]
-            
-                if self.experiment == 'spsp1':
-                    if self.model_type == 'G':
-                        x_identic = self.model(x_f0, x_real_org, emb_org, rr=False)
-                        loss_id = F.mse_loss(x_identic, x_real_org, reduction='sum')
-                    else:
-                        x_identic = self.model(x_real_org, f0_org_one_hot, rr=False).view(-1, self.config.dim_f0)
-                        f0_org_quantized = f0_org_quantized.view(-1)
-                        loss_id = F.cross_entropy(x_identic, f0_org_quantized, reduction='sum')
-                elif self.experiment == 'spsp2':
-                    if self.model_type == 'G':
-                        x_identic = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
-                        loss_id = F.mse_loss(x_identic, x_real_org, reduction='sum')
-                    else:
-                        x_identic = self.model(x_filt_org, f0_org_one_hot, rr=False).view(-1, self.config.dim_f0)
-                        f0_org_quantized = f0_org_quantized.view(-1)
-                        loss_id = F.cross_entropy(x_identic, f0_org_quantized, reduction='sum')
+
+                if self.model_type == 'G':
+                    # Prepare input data and apply random resampling
+                    content_pitch_input = torch.cat((content_input, pitch_input), dim=-1) # [B, T, F+1]
+                    pitch_input = quantize_f0_torch(content_pitch_input[:, :, -1])[0] # [B, T, 257]
+                    content_pitch_input = torch.cat((content_pitch_input[:,:,:-1], pitch_input), dim=-1) # [B, T, F+257]
+
+                    # Identity mapping loss
+                    spmel_output = self.model(content_pitch_input, rhythm_input, timbre_input, rr=False)
+                    loss_id = F.mse_loss(spmel_output, spmel_gt)
+                elif self.model_type == 'F':
+                    # Prepare input data and apply random resampling
+                    pitch_gt = quantize_f0_torch(pitch_input)[1].view(-1)
+                    pitch_input = quantize_f0_torch(pitch_input)[0] # [B, T, 257]
+
+                    # Cross entropy loss
+                    pitch_output = self.model(rhythm_input, pitch_input, rr=False).view(-1, self.config.dim_f0)
+                    loss_id = F.cross_entropy(pitch_output, pitch_gt)
                 else:
                     raise ValueError
             
@@ -346,8 +332,6 @@ class Solver(object):
             print("Iteration {}, {}/test_loss_id: {}".format(self.resume_iters, self.model_type, test_loss_id))
             if self.use_tensorboard:
                 self.writer.add_scalar(f'{self.model_type}/test_loss_id', test_loss_id, self.resume_iters)
-
-        self.plot_G(self.resume_iters)
 
 
     def validate(self):
@@ -362,56 +346,52 @@ class Solver(object):
                 #                             1. Preprocess input data                                #
                 # =================================================================================== #
 
-                # Fetch real images and labels.
+                # Load data
                 try:
-                    _, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
+                    _, spmel_gt, rhythm_input, content_input, pitch_input, timbre_input, len_crop = next(self.data_iter)
                 except:
                     break
                 
-                batch_size = len(x_real_org)
-                x_real_org = x_real_org.to(self.device)
-                x_real_org_filt = x_real_org_filt.to(self.device)
-                x_real_org_warp = x_real_org_warp.to(self.device)
-                emb_org = emb_org.to(self.device)
-                len_org = len_org.to(self.device)
-                f0_org = f0_org.to(self.device)
+                batch_size = len(spmel_gt)
+                spmel_gt = spmel_gt.to(self.device)
+                rhythm_input = rhythm_input.to(self.device)
+                content_input = content_input.to(self.device)
+                pitch_input = pitch_input.to(self.device)
+                timbre_input = timbre_input.to(self.device)
+                len_crop = len_crop.to(self.device)
                 
                 # =================================================================================== #
-                #                             2. Evaluate the generator                               #
+                #                              2. Evaluate the model                                  #
                 # =================================================================================== #
-                            
-                # Identity mapping loss
-                x_filt_org = torch.cat((x_real_org_filt[:,:,:1], x_real_org_warp), dim=-1) # [B, T, F+1]
-                f0_org_one_hot, f0_org_quantized = quantize_f0_torch(f0_org) # [B, T, 257], [B, T, 1]
-                x_f0 = torch.cat((x_real_org_warp, f0_org_one_hot), dim=-1) # [B, T, F+257]
-            
-                if self.experiment == 'spsp1':
-                    if self.model_type == 'G':
-                        x_identic = self.model(x_f0, x_real_org, emb_org, rr=False)
-                        loss_id = F.mse_loss(x_identic, x_real_org, reduction='sum')
-                    else:
-                        x_identic = self.model(x_real_org, f0_org_one_hot, rr=False).view(-1, self.config.dim_f0)
-                        f0_org_quantized = f0_org_quantized.view(-1)
-                        loss_id = F.cross_entropy(x_identic, f0_org_quantized, reduction='sum')
-                elif self.experiment == 'spsp2':
-                    if self.model_type == 'G':
-                        x_identic = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
-                        loss_id = F.mse_loss(x_identic, x_real_org, reduction='sum')
-                    else:
-                        x_identic = self.model(x_filt_org, f0_org_one_hot, rr=False).view(-1, self.config.dim_f0)
-                        f0_org_quantized = f0_org_quantized.view(-1)
-                        loss_id = F.cross_entropy(x_identic, f0_org_quantized, reduction='sum')
+
+                if self.model_type == 'G':
+                    # Prepare input data and apply random resampling
+                    content_pitch_input = torch.cat((content_input, pitch_input), dim=-1) # [B, T, F+1]
+                    pitch_input = quantize_f0_torch(content_pitch_input[:, :, -1])[0] # [B, T, 257]
+                    content_pitch_input = torch.cat((content_pitch_input[:,:,:-1], pitch_input), dim=-1) # [B, T, F+257]
+
+                    # Identity mapping loss
+                    spmel_output = self.model(content_pitch_input, rhythm_input, timbre_input, rr=False)
+                    loss_id = F.mse_loss(spmel_output, spmel_gt)
+                elif self.model_type == 'F':
+                    # Prepare input data and apply random resampling
+                    pitch_gt = quantize_f0_torch(pitch_input)[1].view(-1)
+                    pitch_input = quantize_f0_torch(pitch_input)[0] # [B, T, 257]
+
+                    # Cross entropy loss
+                    pitch_output = self.model(rhythm_input, pitch_input, rr=False).view(-1, self.config.dim_f0)
+                    loss_id = F.cross_entropy(pitch_output, pitch_gt)
                 else:
                     raise ValueError
             
-                # log validation loss.
+                # log testing loss.
                 val_loss_id += loss_id.item()
                 sample_cnt += batch_size
             
             val_loss_id /= sample_cnt
-            print("Iteration {}, {}/val_loss_id: {}".format(self.resume_iters, self.model_type, val_loss_id))
+            print("Iteration {}, {}/test_loss_id: {}".format(self.resume_iters, self.model_type, val_loss_id))
             if self.use_tensorboard:
-                self.writer.add_scalar(f'{self.model_type}/val_loss_id', val_loss_id, self.resume_iters)
+                self.writer.add_scalar(f'{self.model_type}/test_loss_id', val_loss_id, self.resume_iters)
 
         # return to training mode
         self.model = self.model.train()
@@ -431,68 +411,50 @@ class Solver(object):
 
             # Load data
             try:
-                spk_id_org, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
+                spk_id_org, spmel_gt, rhythm_input, content_input, pitch_input, timbre_input, len_crop = next(self.data_iter)
             except:
                 self.data_iter = iter(self.data_loader)
-                spk_id_org, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
+                spk_id_org, spmel_gt, rhythm_input, content_input, pitch_input, timbre_input, len_crop = next(self.data_iter)
 
-            x_real_org = x_real_org.to(self.device)
-            x_real_org_filt = x_real_org_filt.to(self.device)
-            x_real_org_warp = x_real_org_warp.to(self.device)
-            emb_org = emb_org.to(self.device)
-            len_org = len_org.to(self.device)
-            f0_org = f0_org.to(self.device)
+            spmel_gt = spmel_gt.to(self.device)
+            rhythm_input = rhythm_input.to(self.device)
+            content_input = content_input.to(self.device)
+            pitch_input = pitch_input.to(self.device)
+            timbre_input = timbre_input.to(self.device)
+            len_crop = len_crop.to(self.device)
             
             # =================================================================================== #
-            #                             2. Evaluate the generator                               #
+            #                             2. Generate different outputs                           #
             # =================================================================================== #
                         
-            # Identity mapping loss
-            if self.experiment == 'spsp1':
-
-                f0_org_one_hot = quantize_f0_torch(f0_org)[0] # [B, T, 257]
-                x_f0 = torch.cat((x_real_org, f0_org_one_hot), dim=-1) # [B, T, F+257]
-                x_f0_woF = torch.cat((x_real_org, torch.zeros_like(f0_org_one_hot)), dim=-1) # [B, T, F+257]
-                x_f0_woC = torch.cat((torch.zeros_like(x_real_org), f0_org_one_hot), dim=-1) # [B, T, F+257]
-                x_f0_woCF = torch.zeros_like(x_f0) # [B, T, F+257]
-            
-                x_identic = self.model(x_f0, x_real_org, emb_org, rr=False)
-                x_identic_woF = self.model(x_f0_woF, x_real_org, emb_org, rr=False)
-                x_identic_woR = self.model(x_f0, torch.zeros_like(x_real_org), emb_org, rr=False)
-                x_identic_woC = self.model(x_f0_woC, x_real_org, emb_org, rr=False)
-                x_identic_woT = self.model(x_f0, x_real_org, torch.zeros_like(emb_org), rr=False)
-                x_identic_woCF = self.model(x_f0_woCF, x_real_org, emb_org, rr=False)
-            elif self.experiment == 'spsp2':
-                f0_org_one_hot = quantize_f0_torch(f0_org)[0] # [B, T, 257]
-                x_f0 = torch.cat((x_real_org_warp, f0_org_one_hot), dim=-1) # [B, T, F+1+257]
-                x_f0_woF = torch.cat((x_real_org_warp, torch.zeros_like(f0_org_one_hot)), dim=-1) # [B, T, F+1+257]
-                x_f0_woC = torch.cat((torch.zeros_like(x_real_org_warp), f0_org_one_hot), dim=-1) # [B, T, F+1+257]
-                x_f0_woCF = torch.zeros_like(x_f0) # [B, T, F+1+257]
-
-                x_identic = self.model(x_f0, x_real_org_filt, emb_org, rr=False)
-                x_identic_woF = self.model(x_f0_woF, x_real_org_filt, emb_org, rr=False)
-                x_identic_woR = self.model(x_f0, torch.zeros_like(x_real_org_filt), emb_org, rr=False)
-                x_identic_woC = self.model(x_f0_woC, x_real_org_filt, emb_org, rr=False)
-                x_identic_woT = self.model(x_f0, x_real_org_filt, torch.zeros_like(emb_org), rr=False)
-                x_identic_woCF = self.model(x_f0_woCF, x_real_org_filt, emb_org, rr=False)
-            else:
-                raise ValueError
+            pitch_input = quantize_f0_torch(pitch_input)[0] # [B, T, 257]
+            content_pitch_input = torch.cat((content_input, pitch_input), dim=-1) # [B, T, F+257]
+            content_pitch_input_woF = torch.cat((content_input, torch.zeros_like(pitch_input)), dim=-1) # [B, T, F+257]
+            content_pitch_input_woC = torch.cat((torch.zeros_like(content_input), pitch_input), dim=-1) # [B, T, F+257]
+            content_pitch_input_woCF = torch.zeros_like(content_pitch_input) # [B, T, F+257]
+        
+            spmel_output = self.model(content_pitch_input, rhythm_input, timbre_input, rr=False)
+            spmel_output_woF = self.model(content_pitch_input_woF, rhythm_input, timbre_input, rr=False)
+            spmel_output_woR = self.model(content_pitch_input, torch.zeros_like(rhythm_input), timbre_input, rr=False)
+            spmel_output_woC = self.model(content_pitch_input_woC, rhythm_input, timbre_input, rr=False)
+            spmel_output_woT = self.model(content_pitch_input, rhythm_input, torch.zeros_like(timbre_input), rr=False)
+            spmel_output_woCF = self.model(content_pitch_input_woCF, rhythm_input, timbre_input, rr=False)
 
             # plot input
-            x_real_org_filt = x_real_org_filt[0].cpu().numpy()
-            x_real_org_warp = x_real_org_warp[0].cpu().numpy()
-            f0_org_one_hot = f0_org_one_hot[0].cpu().numpy()
+            rhythm_input = rhythm_input[0].cpu().numpy()
+            content_input = content_input[0].cpu().numpy()
+            pitch_input = pitch_input[0].cpu().numpy()
 
-            spenv = x_real_org_filt[:, 1:]
-            dog_output = x_real_org_filt[:, :1]
-            dog_output = np.repeat(dog_output, spenv.shape[1], axis=1)
+            spenv = rhythm_input[:, 1:]
+            spmel_filt = rhythm_input[:, :1]
+            spmel_filt = np.repeat(spmel_filt, spenv.shape[1], axis=1)
             spenv = spenv.T
-            dog_output = dog_output.T
-            mono_spmel = x_real_org_warp.T
-            pitch_contour = f0_org_one_hot.T
+            spmel_filt = spmel_filt.T
+            spmel_mono = content_input.T
+            f0 = pitch_input.T
 
-            min_value = np.min(np.vstack([spenv, dog_output, mono_spmel, pitch_contour]))
-            max_value = np.max(np.vstack([spenv, dog_output, mono_spmel, pitch_contour]))
+            min_value = np.min(np.vstack([spenv, spmel_filt, spmel_mono, f0]))
+            max_value = np.max(np.vstack([spenv, spmel_filt, spmel_mono, f0]))
             
             fig, (ax1,ax2,ax3,ax4) = plt.subplots(4, 1, sharex=True, figsize=(14, 10))
             ax1.set_title('Spectral Envelope', fontsize=10)
@@ -500,23 +462,23 @@ class Solver(object):
             ax3.set_title('Monotonic Mel-Spectrogram', fontsize=10)
             ax4.set_title('Pitch Contour', fontsize=10)
             _ = ax1.imshow(spenv, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax2.imshow(dog_output, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax3.imshow(mono_spmel, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax4.imshow(pitch_contour, aspect='auto', vmin=min_value, vmax=max_value)
-            plt.savefig(f'{self.sample_dir}/{self.model_name}_{self.mode}_{self.model_type}_input_{spk_id_org[0]}_{step}.png', dpi=150)
+            _ = ax2.imshow(spmel_filt, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax3.imshow(spmel_mono, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax4.imshow(f0, aspect='auto', vmin=min_value, vmax=max_value)
+            plt.savefig(f'{self.sample_dir}/{self.model_name}-{self.mode}-{self.model_type}-input-{spk_id_org[0]}-{step}.png', dpi=150)
             plt.close(fig)
 
             # plot output
-            melsp_gd_pad = x_real_org[0].cpu().numpy().T
-            melsp_out = x_identic[0].cpu().numpy().T
-            melsp_woF = x_identic_woF[0].cpu().numpy().T
-            melsp_woR = x_identic_woR[0].cpu().numpy().T
-            melsp_woC = x_identic_woC[0].cpu().numpy().T
-            melsp_woT = x_identic_woT[0].cpu().numpy().T
-            melsp_woCF = x_identic_woCF[0].cpu().numpy().T
+            spmel_gt = spmel_gt[0].cpu().numpy().T
+            spmel_output = spmel_output[0].cpu().numpy().T
+            spmel_output_woF = spmel_output_woF[0].cpu().numpy().T
+            spmel_output_woR = spmel_output_woR[0].cpu().numpy().T
+            spmel_output_woC = spmel_output_woC[0].cpu().numpy().T
+            spmel_output_woT = spmel_output_woT[0].cpu().numpy().T
+            spmel_output_woCF = spmel_output_woCF[0].cpu().numpy().T
 
-            min_value = np.min(np.hstack([melsp_gd_pad, melsp_out, melsp_woF, melsp_woR, melsp_woC, melsp_woT, melsp_woCF]))
-            max_value = np.max(np.hstack([melsp_gd_pad, melsp_out, melsp_woF, melsp_woR, melsp_woC, melsp_woT, melsp_woCF]))
+            min_value = np.min(np.hstack([spmel_gt, spmel_output, spmel_output_woF, spmel_output_woR, spmel_output_woC, spmel_output_woT, spmel_output_woCF]))
+            max_value = np.max(np.hstack([spmel_gt, spmel_output, spmel_output_woF, spmel_output_woR, spmel_output_woC, spmel_output_woT, spmel_output_woCF]))
             
             fig, (ax1,ax2,ax3,ax4,ax5,ax6,ax7) = plt.subplots(7, 1, sharex=True, figsize=(14, 10))
             ax1.set_title('Original Mel-Spectrogram', fontsize=10)
@@ -526,14 +488,14 @@ class Solver(object):
             ax5.set_title('Output Mel-Spectrogram Without Pitch', fontsize=10)
             ax6.set_title('Output Mel-Spectrogram Without Timbre', fontsize=10)
             ax7.set_title('Output Mel-Spectrogram Without Content And Pitch', fontsize=10)
-            _ = ax1.imshow(melsp_gd_pad, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax2.imshow(melsp_out, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax3.imshow(melsp_woC, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax4.imshow(melsp_woR, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax5.imshow(melsp_woF, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax6.imshow(melsp_woT, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax7.imshow(melsp_woCF, aspect='auto', vmin=min_value, vmax=max_value)
-            plt.savefig(f'{self.sample_dir}/{self.model_name}_{self.mode}_{self.model_type}_output_{spk_id_org[0]}_{step}.png', dpi=150)
+            _ = ax1.imshow(spmel_gt, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax2.imshow(spmel_output, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax3.imshow(spmel_output_woC, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax4.imshow(spmel_output_woR, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax5.imshow(spmel_output_woF, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax6.imshow(spmel_output_woT, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax7.imshow(spmel_output_woCF, aspect='auto', vmin=min_value, vmax=max_value)
+            plt.savefig(f'{self.sample_dir}/{self.model_name}-{self.mode}-{self.model_type}-output-{spk_id_org[0]}-{step}.png', dpi=150)
             plt.close(fig)
 
         self.model = self.model.train()
@@ -551,80 +513,68 @@ class Solver(object):
 
             # Load data
             try:
-                spk_id_org, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
+                spk_id_org, spmel_gt, rhythm_input, content_input, pitch_input, timbre_input, len_crop = next(self.data_iter)
             except:
                 self.data_iter = iter(self.data_loader)
-                spk_id_org, x_real_org, x_real_org_filt, x_real_org_warp, emb_org, f0_org, len_org = next(self.data_iter)
+                spk_id_org, spmel_gt, rhythm_input, content_input, pitch_input, timbre_input, len_crop = next(self.data_iter)
 
-            x_real_org = x_real_org.to(self.device)
-            x_real_org_filt = x_real_org_filt.to(self.device)
-            x_real_org_warp = x_real_org_warp.to(self.device)
-            f0_org = f0_org.to(self.device)
-
-            f0_org_one_hot = quantize_f0_torch(f0_org)[0] # [B, T, 257]
-
+            rhythm_input = rhythm_input.to(self.device)
+            pitch_input = pitch_input.to(self.device)
+            
             # =================================================================================== #
-            #                             2. Evaluate the generator                               #
+            #                             2. Generate different outputs                           #
             # =================================================================================== #
                         
-            # Identity mapping loss
-            if self.experiment == 'spsp1':
-                f0_identic = self.model(x_real_org, f0_org_one_hot, rr=False)
-                f0_identic_woR = self.model(torch.zeros_like(x_real_org), f0_org_one_hot, rr=False)
-                f0_identic_woF = self.model(x_real_org, torch.zeros_like(f0_org_one_hot), rr=False)
-            elif self.experiment == 'spsp2':
-                x_filt_org = torch.cat((x_real_org_filt[:,:,:1], x_real_org_warp), dim=-1) # [B, T, F+1]
-
-                f0_identic = self.model(x_filt_org, f0_org_one_hot, rr=False)
-                f0_identic_woR = self.model(torch.zeros_like(x_filt_org), f0_org_one_hot, rr=False)
-                f0_identic_woF = self.model(x_filt_org, torch.zeros_like(f0_org_one_hot), rr=False)
-            else:
-                raise ValueError
+            pitch_gt = quantize_f0_torch(pitch_input)[0] # [B, T, 257]
+            pitch_input = quantize_f0_torch(pitch_input)[0] # [B, T, 257]
+            
+            pitch_output = self.model(rhythm_input, pitch_input, rr=False)
+            pitch_output_woR = self.model(torch.zeros_like(rhythm_input), pitch_input, rr=False)
+            pitch_output_woF = self.model(rhythm_input, torch.zeros_like(pitch_input), rr=False)
 
             # plot input
-            x_real_org_filt = x_real_org_filt[0].cpu().numpy()
-            x_real_org_warp = x_real_org_warp[0].cpu().numpy()
-            f0_org_one_hot = f0_org_one_hot[0].cpu().numpy()
+            rhythm_input = rhythm_input[0].cpu().numpy()
+            pitch_gt = pitch_gt[0].cpu().numpy()
 
-            spenv = x_real_org_filt[:, 1:]
-            dog_output = x_real_org_filt[:, :1]
-            dog_output = np.repeat(dog_output, spenv.shape[1], axis=1)
-            dog_output = dog_output.T
-            mono_spmel = x_real_org_warp.T
-            pitch_contour = f0_org_one_hot.T
+            spmel_mono = rhythm_input[:, 1:]
+            spmel_filt = rhythm_input[:, :1]
+            spmel_filt = np.repeat(spmel_filt, spmel_mono.shape[1], axis=1)
+            spmel_mono = spmel_mono.T
+            spmel_filt = spmel_filt.T
+            f0 = pitch_gt.T
 
-            min_value = np.min(np.vstack([dog_output, mono_spmel, pitch_contour]))
-            max_value = np.max(np.vstack([dog_output, mono_spmel, pitch_contour]))
+            min_value = np.min(np.vstack([spmel_mono, spmel_filt, f0]))
+            max_value = np.max(np.vstack([spmel_mono, spmel_filt, f0]))
             
             fig, (ax1,ax2,ax3) = plt.subplots(3, 1, sharex=True, figsize=(14, 10))
-            ax1.set_title('DoG output', fontsize=10)
-            ax2.set_title('Monotonic Mel-Spectrogram', fontsize=10)
+            ax1.set_title('Monotonic Mel-Spectrogram', fontsize=10)
+            ax2.set_title('DoG output', fontsize=10)
             ax3.set_title('Pitch Contour', fontsize=10)
-            _ = ax1.imshow(dog_output, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax2.imshow(mono_spmel, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax3.imshow(pitch_contour, aspect='auto', vmin=min_value, vmax=max_value)
-            plt.savefig(f'{self.sample_dir}/{self.model_name}_{self.mode}_{self.model_type}_input_{spk_id_org[0]}_{step}.png', dpi=150)
+            _ = ax1.imshow(spmel_mono, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax2.imshow(spmel_filt, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax3.imshow(f0, aspect='auto', vmin=min_value, vmax=max_value)
+            plt.savefig(f'{self.sample_dir}/{self.model_name}-{self.mode}-{self.model_type}-input-{spk_id_org[0]}-{step}.png', dpi=150)
             plt.close(fig)
 
             # plot output
-            f0_gd_pad = f0_org_one_hot.T
-            f0_out = tensor2onehot(f0_identic)[0].cpu().numpy().T
-            f0_woR = tensor2onehot(f0_identic_woR)[0].cpu().numpy().T
-            f0_woF = tensor2onehot(f0_identic_woF)[0].cpu().numpy().T
+            pitch_gt = pitch_gt.T
+            pitch_output = tensor2onehot(pitch_output)[0].cpu().numpy().T
+            pitch_output_woR = tensor2onehot(pitch_output_woR)[0].cpu().numpy().T
+            pitch_output_woF = tensor2onehot(pitch_output_woF)[0].cpu().numpy().T
 
-            min_value = np.min(np.hstack([f0_gd_pad, f0_out, f0_woR, f0_woF]))
-            max_value = np.max(np.hstack([f0_gd_pad, f0_out, f0_woR, f0_woF]))
+            min_value = np.min(np.hstack([pitch_gt, pitch_output, pitch_output_woR, pitch_output_woF]))
+            max_value = np.max(np.hstack([pitch_gt, pitch_output, pitch_output_woR, pitch_output_woF]))
             
             fig, (ax1,ax2,ax3,ax4) = plt.subplots(4, 1, sharex=True, figsize=(14, 10))
             ax1.set_title('Original Pitch Contour', fontsize=10)
             ax2.set_title('Output Pitch Contour', fontsize=10)
             ax3.set_title('Output Pitch Contour Without Rhythm', fontsize=10)
             ax4.set_title('Output Pitch Contour Without Pitch', fontsize=10)
-            _ = ax1.imshow(f0_gd_pad, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax2.imshow(f0_out, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax3.imshow(f0_woR, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax4.imshow(f0_woF, aspect='auto', vmin=min_value, vmax=max_value)
-            plt.savefig(f'{self.sample_dir}/{self.model_name}_{self.mode}_{self.model_type}_output_{spk_id_org[0]}_{step}.png', dpi=150)
+            _ = ax1.imshow(pitch_gt, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax2.imshow(pitch_output, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax3.imshow(pitch_output_woR, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax4.imshow(pitch_output_woF, aspect='auto', vmin=min_value, vmax=max_value)
+            plt.savefig(f'{self.sample_dir}/{self.model_name}-{self.mode}-{self.model_type}-output-{spk_id_org[0]}-{step}.png', dpi=150)
             plt.close(fig)
 
         self.model = self.model.train()

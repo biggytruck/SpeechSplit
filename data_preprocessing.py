@@ -1,21 +1,20 @@
 import os
 import pickle
-from librosa.core.audio import get_samplerate
 import numpy as np
 import soundfile as sf
 from numpy.random import RandomState
-from sklearn.model_selection import train_test_split
 from utils import *
 
 def make_spect_f0(config):
-    cutoff = config.cutoff
-    root_dir = os.path.join(config.root_dir, config.mode)
+    fs = 16000
+    mode = config.mode
+    root_dir = os.path.join(config.root_dir, mode)
     src_dir = os.path.join(root_dir, config.src_dir)
     wav_dir = os.path.join(root_dir, config.wav_dir)
     spmel_dir = os.path.join(root_dir, config.spmel_dir)
     spmel_filt_dir = os.path.join(root_dir, config.spmel_filt_dir)
-    spenv_dir = os.path.join(root_dir, config.spenv_dir+str(cutoff))
-    spmel_smooth_dir = os.path.join(root_dir, config.spmel_smooth_dir)
+    spmel_mono_dir = os.path.join(root_dir, config.spmel_mono_dir)
+    spenv_dir = os.path.join(root_dir, config.spenv_dir)
     f0_dir = os.path.join(root_dir, config.f0_dir)
     spk2gen = pickle.load(open('spk2gen.pkl', "rb"))
 
@@ -26,18 +25,11 @@ def make_spect_f0(config):
     for sub_dir in sorted(sub_dir_list):
         print(sub_dir)
         
-        if not os.path.exists(os.path.join(wav_dir, sub_dir)):
-            os.makedirs(os.path.join(wav_dir, sub_dir))
-        if not os.path.exists(os.path.join(spmel_dir, sub_dir)):
-            os.makedirs(os.path.join(spmel_dir, sub_dir))
-        if not os.path.exists(os.path.join(spmel_filt_dir, sub_dir)):
-            os.makedirs(os.path.join(spmel_filt_dir, sub_dir))
-        if not os.path.exists(os.path.join(spenv_dir, sub_dir)):
-            os.makedirs(os.path.join(spenv_dir, sub_dir))
-        if not os.path.exists(os.path.join(spmel_smooth_dir, sub_dir)):
-            os.makedirs(os.path.join(spmel_smooth_dir, sub_dir))
-        if not os.path.exists(os.path.join(f0_dir, sub_dir)):
-            os.makedirs(os.path.join(f0_dir, sub_dir))    
+        # create directories if not exist
+        for fea_dir in [wav_dir, spmel_dir, spmel_filt_dir, spmel_mono_dir, spenv_dir, f0_dir]:
+            if not os.path.exists(os.path.join(fea_dir, sub_dir)):
+                os.makedirs(os.path.join(fea_dir, sub_dir))
+
         _,_, file_list = next(os.walk(os.path.join(dir_name,sub_dir)))
         
         if spk2gen[sub_dir] == 'M':
@@ -48,37 +40,57 @@ def make_spect_f0(config):
             continue
 
         prng = RandomState(state_count) 
+        wavs, f0s, sps, aps = [], [], [], []
         for filename in sorted(file_list):
             # read audio file
-            x, fs = sf.read(os.path.join(dir_name,sub_dir,filename))
+            x, _ = sf.read(os.path.join(dir_name,sub_dir,filename))
             if x.shape[0] % 256 == 0:
                 x = np.concatenate((x, np.array([1e-06])), axis=0)
-            assert fs == 16000
 
-            if config.mode == 'train':
-
+            if mode == 'train':
+                # apply high-pass filter
                 wav = filter_wav(x, prng)
+            else:
+                wav = x
 
-                # compute spectrogram
-                spmel = get_spmel(wav)
+            # get WORLD analyzer parameters
+            f0, sp, ap = get_world_params(wav, fs)
 
-                # extract f0
-                f0_rapt, f0_norm = extract_f0(wav, fs, lo, hi)
+            wavs.append(wav)
+            f0s.append(f0)
+            sps.append(sp)
+            aps.append(ap)
 
-                # use world to smooth out pitch contour
-                wav_wo_f0 = removef0(wav, fs)
-                
-                # compute the spectrogram after f0 is removed
-                spmel_smooth = get_spmel(wav_wo_f0)
+        if mode == 'train':
+            # normalize all f0s to be the global mean
+            f0s = average_f0s(f0s, mode='global')
+        else:
+            # normalize all f0s to be the local mean
+            f0s = average_f0s(f0s, mode='local')
 
-                # compute filtered spectrogram
-                spmel_filt = get_spmel_filt(spmel_smooth)
+        for wav, f0, sp, ap in zip(wavs, f0s, sps, aps):
 
-                # get spectral envelope
-                spenv = get_spenv(wav_wo_f0, cutoff)
-                
-                assert len(spmel) == len(spmel_filt) == len(spenv) == len(spmel_smooth) == len(f0_rapt)
+            # compute spectrogram
+            spmel = get_spmel(wav)
 
+            # extract f0
+            f0_rapt, f0_norm = extract_f0(wav, fs, lo, hi)
+
+            # synthesize monotonic waveforms using WORLD
+            wav_mono = get_monotonic_wav(wav, f0, sp, ap, fs)
+            
+            # compute the monotonic spectrogram
+            spmel_mono = get_spmel(wav_mono)
+
+            # compute filtered spectrogram
+            spmel_filt = get_spmel_filt(spmel_mono)
+
+            # get spectral envelope
+            spenv = get_spenv(wav_mono)
+            
+            assert len(spmel) == len(spmel_filt) == len(spenv) == len(spmel_mono) == len(f0_rapt)
+
+            if mode == 'train':
                 # pad filtered waveform
                 start_idx = 0
                 trunk_len = 49152
@@ -86,13 +98,13 @@ def make_spect_f0(config):
                     wav_trunk = wav[start_idx*trunk_len:(start_idx+1)*trunk_len]
                     if len(wav_trunk) < trunk_len:
                         wav_trunk = np.pad(wav_trunk, (0, trunk_len-len(wav_trunk)))
-                    np.save(os.path.join(wav_dir, sub_dir, os.path.splitext(filename)[0]+str(start_idx)),
+                    np.save(os.path.join(wav_dir, sub_dir, os.path.splitext(filename)[0]+'_'+str(start_idx)),
                             wav_trunk.astype(np.float32), allow_pickle=False)
                     start_idx += 1
 
                 # pad other features
-                feas = [spmel, spmel_filt, spenv, spmel_smooth, f0_norm]
-                fea_dirs = [spmel_dir, spmel_filt_dir, spenv_dir, spmel_smooth_dir, f0_dir]
+                feas = [spmel, spmel_filt, spenv, spmel_mono, f0_norm]
+                fea_dirs = [spmel_dir, spmel_filt_dir, spenv_dir, spmel_mono_dir, f0_dir]
                 for fea, fea_dir in zip(feas, fea_dirs):
                     start_idx = 0
                     trunk_len = 192
@@ -103,46 +115,16 @@ def make_spect_f0(config):
                                 fea_trunk = np.pad(fea_trunk, ((0, trunk_len-len(fea_trunk)), (0, 0)))
                             else:
                                 fea_trunk = np.pad(fea_trunk, ((0, trunk_len-len(fea_trunk)), ))
-                        np.save(os.path.join(fea_dir, sub_dir, os.path.splitext(filename)[0]+str(start_idx)),
+                        np.save(os.path.join(fea_dir, sub_dir, os.path.splitext(filename)[0]+'_'+str(start_idx)),
                                 fea_trunk.astype(np.float32), allow_pickle=False)
                         start_idx += 1
-
             else:
+                feas = [wav, spmel, spmel_filt, spenv, spmel_mono, f0_norm]
+                fea_dirs = [wav_dir, spmel_dir, spmel_filt_dir, spenv_dir, spmel_mono_dir, f0_dir]
+                for fea, fea_dir in zip(feas, fea_dirs):
+                    np.save(os.path.join(fea_dir, sub_dir, os.path.splitext(filename)[0]),
+                            fea.astype(np.float32), allow_pickle=False)
 
-                wav = x
-
-                # compute spectrogram
-                spmel = get_spmel(wav)
-
-                # extract f0
-                f0_rapt, f0_norm = extract_f0(wav, fs, lo, hi)
-
-                # use world to smooth out pitch contour
-                wav_wo_f0 = removef0(wav, fs, random_warping=False)
-                
-                # compute the spectrogram after f0 is removed
-                spmel_smooth = get_spmel(wav_wo_f0)
-
-                # compute filtered spectrogram
-                spmel_filt = get_spmel_filt(spmel_smooth)
-
-                # get spectral envelope
-                spenv = get_spenv(wav_wo_f0, cutoff)
-                
-                assert len(spmel) == len(spmel_filt) == len(spenv) == len(spmel_smooth) == len(f0_rapt)
-
-                np.save(os.path.join(wav_dir, sub_dir, os.path.splitext(filename)[0]),
-                    wav.astype(np.float32), allow_pickle=False)     
-                np.save(os.path.join(spmel_dir, sub_dir, os.path.splitext(filename)[0]),
-                        spmel.astype(np.float32), allow_pickle=False) 
-                np.save(os.path.join(spmel_filt_dir, sub_dir, os.path.splitext(filename)[0]),
-                        spmel_filt.astype(np.float32), allow_pickle=False) 
-                np.save(os.path.join(spenv_dir, sub_dir, os.path.splitext(filename)[0]),
-                        spenv.astype(np.float32), allow_pickle=False) 
-                np.save(os.path.join(spmel_smooth_dir, sub_dir, os.path.splitext(filename)[0]),
-                        spmel_smooth.astype(np.float32), allow_pickle=False) 
-                np.save(os.path.join(f0_dir, sub_dir, os.path.splitext(filename)[0]),
-                        f0_norm.astype(np.float32), allow_pickle=False)
 
 def make_metadata(config):
     root_dir = os.path.join(config.root_dir, config.mode)
