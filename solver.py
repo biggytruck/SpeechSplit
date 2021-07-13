@@ -81,6 +81,8 @@ class Solver(object):
         self.optimizer = torch.optim.Adam(self.model.parameters(), self.lr, [self.beta1, self.beta2], weight_decay=1e-6)
         self.Interp.to(self.device)
 
+        self.scheduler = STLR(self.optimizer, num_iters=self.num_iters, cut_frac=0.1, ratio=32)
+
         
     def print_network(self, model, name):
         """Print out the network information."""
@@ -120,6 +122,7 @@ class Solver(object):
                     new_state_dict[k[7:]] = v
                 self.model.load_state_dict(new_state_dict)
             self.optimizer.load_state_dict(ckpt['optimizer'])
+            self.scheduler.load_state_dict(ckpt['scheduler'])
             self.lr = self.optimizer.param_groups[0]['lr']
         
         
@@ -208,6 +211,7 @@ class Solver(object):
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+            self.scheduler.step()
 
             # Logging.
             train_loss_id = loss_id.item()
@@ -237,7 +241,8 @@ class Solver(object):
             if (i+1) % self.ckpt_save_step == 0:
                 ckpt_path = os.path.join(self.model_save_dir, '{}-{}-{}.ckpt'.format(self.model_name, self.model_type, i+1))
                 torch.save({'model': self.model.state_dict(),
-                            'optimizer': self.optimizer.state_dict()}, ckpt_path)
+                            'optimizer': self.optimizer.state_dict(),
+                            'scheduler': self.scheduler.state_dict()}, ckpt_path)
                 print('Saved model checkpoints into {}...'.format(self.model_save_dir))
                 if self.use_tensorboard:
                     self.writer.add_scalar(f'{self.model_type}/train_loss_id', train_loss_id, i+1)
@@ -441,30 +446,20 @@ class Solver(object):
             spmel_output_woCF = self.model(content_pitch_input_woCF, rhythm_input, timbre_input, rr=False)
 
             # plot input
-            rhythm_input = rhythm_input[0].cpu().numpy()
-            content_input = content_input[0].cpu().numpy()
-            pitch_input = pitch_input[0].cpu().numpy()
+            rhythm_input = rhythm_input[0].cpu().numpy().T
+            content_input = content_input[0].cpu().numpy().T
+            pitch_input = pitch_input[0].cpu().numpy().T
 
-            spenv = rhythm_input[:, 1:]
-            spmel_filt = rhythm_input[:, :1]
-            spmel_filt = np.repeat(spmel_filt, spenv.shape[1], axis=1)
-            spenv = spenv.T
-            spmel_filt = spmel_filt.T
-            spmel_mono = content_input.T
-            f0 = pitch_input.T
-
-            min_value = np.min(np.vstack([spenv, spmel_filt, spmel_mono, f0]))
-            max_value = np.max(np.vstack([spenv, spmel_filt, spmel_mono, f0]))
+            min_value = np.min(np.vstack([rhythm_input, content_input, pitch_input]))
+            max_value = np.max(np.vstack([rhythm_input, content_input, pitch_input]))
             
-            fig, (ax1,ax2,ax3,ax4) = plt.subplots(4, 1, sharex=True, figsize=(14, 10))
-            ax1.set_title('Spectral Envelope', fontsize=10)
-            ax2.set_title('DoG output', fontsize=10)
-            ax3.set_title('Monotonic Mel-Spectrogram', fontsize=10)
-            ax4.set_title('Pitch Contour', fontsize=10)
-            _ = ax1.imshow(spenv, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax2.imshow(spmel_filt, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax3.imshow(spmel_mono, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax4.imshow(f0, aspect='auto', vmin=min_value, vmax=max_value)
+            fig, (ax1,ax2,ax3) = plt.subplots(3, 1, sharex=True, figsize=(14, 10))
+            ax1.set_title('Rhythm input', fontsize=10)
+            ax2.set_title('Content input', fontsize=10)
+            ax3.set_title('Pitch input', fontsize=10)
+            _ = ax1.imshow(rhythm_input, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax2.imshow(content_input, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax3.imshow(pitch_input, aspect='auto', vmin=min_value, vmax=max_value)
             plt.savefig(f'{self.sample_dir}/{self.model_name}-{self.mode}-{self.model_type}-input-{spk_id_org[0]}-{step}.png', dpi=150)
             plt.close(fig)
 
@@ -533,26 +528,17 @@ class Solver(object):
             pitch_output_woF = self.model(rhythm_input, torch.zeros_like(pitch_input), rr=False)
 
             # plot input
-            rhythm_input = rhythm_input[0].cpu().numpy()
-            pitch_gt = pitch_gt[0].cpu().numpy()
+            rhythm_input = rhythm_input[0].cpu().numpy().T
+            pitch_gt = pitch_gt[0].cpu().numpy().T
 
-            spmel_mono = rhythm_input[:, 1:]
-            spmel_filt = rhythm_input[:, :1]
-            spmel_filt = np.repeat(spmel_filt, spmel_mono.shape[1], axis=1)
-            spmel_mono = spmel_mono.T
-            spmel_filt = spmel_filt.T
-            f0 = pitch_gt.T
-
-            min_value = np.min(np.vstack([spmel_mono, spmel_filt, f0]))
-            max_value = np.max(np.vstack([spmel_mono, spmel_filt, f0]))
+            min_value = np.min(np.vstack([rhythm_input, pitch_gt]))
+            max_value = np.max(np.vstack([rhythm_input, pitch_gt]))
             
-            fig, (ax1,ax2,ax3) = plt.subplots(3, 1, sharex=True, figsize=(14, 10))
-            ax1.set_title('Monotonic Mel-Spectrogram', fontsize=10)
-            ax2.set_title('DoG output', fontsize=10)
-            ax3.set_title('Pitch Contour', fontsize=10)
-            _ = ax1.imshow(spmel_mono, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax2.imshow(spmel_filt, aspect='auto', vmin=min_value, vmax=max_value)
-            _ = ax3.imshow(f0, aspect='auto', vmin=min_value, vmax=max_value)
+            fig, (ax1,ax2) = plt.subplots(2, 1, sharex=True, figsize=(14, 10))
+            ax1.set_title('Rhythm input', fontsize=10)
+            ax2.set_title('Pitch input', fontsize=10)
+            _ = ax1.imshow(rhythm_input, aspect='auto', vmin=min_value, vmax=max_value)
+            _ = ax2.imshow(pitch_gt, aspect='auto', vmin=min_value, vmax=max_value)
             plt.savefig(f'{self.sample_dir}/{self.model_name}-{self.mode}-{self.model_type}-input-{spk_id_org[0]}-{step}.png', dpi=150)
             plt.close(fig)
 

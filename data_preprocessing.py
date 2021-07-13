@@ -15,6 +15,7 @@ def make_spect_f0(config):
     spmel_filt_dir = os.path.join(root_dir, config.spmel_filt_dir)
     spmel_mono_dir = os.path.join(root_dir, config.spmel_mono_dir)
     spenv_dir = os.path.join(root_dir, config.spenv_dir)
+    mfcc_dir = os.path.join(root_dir, config.mfcc_dir)
     f0_dir = os.path.join(root_dir, config.f0_dir)
     spk2gen = pickle.load(open('spk2gen.pkl', "rb"))
 
@@ -26,7 +27,7 @@ def make_spect_f0(config):
         print(sub_dir)
         
         # create directories if not exist
-        for fea_dir in [wav_dir, spmel_dir, spmel_filt_dir, spmel_mono_dir, spenv_dir, f0_dir]:
+        for fea_dir in [wav_dir, spmel_dir, spmel_filt_dir, spmel_mono_dir, spenv_dir, mfcc_dir, f0_dir]:
             if not os.path.exists(os.path.join(fea_dir, sub_dir)):
                 os.makedirs(os.path.join(fea_dir, sub_dir))
 
@@ -87,8 +88,11 @@ def make_spect_f0(config):
 
             # get spectral envelope
             spenv = get_spenv(wav_mono)
+
+            # get mfcc
+            mfcc = get_mfcc(wav_mono)
             
-            assert len(spmel) == len(spmel_filt) == len(spenv) == len(spmel_mono) == len(f0_rapt)
+            assert len(spmel) == len(spmel_filt) == len(spenv) == len(spmel_mono) == len(f0_rapt) == len(mfcc)
 
             if mode == 'train':
                 # pad filtered waveform
@@ -103,8 +107,8 @@ def make_spect_f0(config):
                     start_idx += 1
 
                 # pad other features
-                feas = [spmel, spmel_filt, spenv, spmel_mono, f0_norm]
-                fea_dirs = [spmel_dir, spmel_filt_dir, spenv_dir, spmel_mono_dir, f0_dir]
+                feas = [spmel, spmel_filt, spenv, spmel_mono, mfcc, f0_norm]
+                fea_dirs = [spmel_dir, spmel_filt_dir, spenv_dir, spmel_mono_dir, mfcc_dir, f0_dir]
                 for fea, fea_dir in zip(feas, fea_dirs):
                     start_idx = 0
                     trunk_len = 192
@@ -120,8 +124,8 @@ def make_spect_f0(config):
                         start_idx += 1
             else:
                 filename = sorted(file_list)[idx]
-                feas = [wav, spmel, spmel_filt, spenv, spmel_mono, f0_norm]
-                fea_dirs = [wav_dir, spmel_dir, spmel_filt_dir, spenv_dir, spmel_mono_dir, f0_dir]
+                feas = [wav, spmel, spmel_filt, spenv, spmel_mono, mfcc, f0_norm]
+                fea_dirs = [wav_dir, spmel_dir, spmel_filt_dir, spenv_dir, spmel_mono_dir, mfcc_dir, f0_dir]
                 for fea, fea_dir in zip(feas, fea_dirs):
                     np.save(os.path.join(fea_dir, sub_dir, os.path.splitext(filename)[0]),
                             fea.astype(np.float32), allow_pickle=False)

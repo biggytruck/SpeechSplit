@@ -18,9 +18,6 @@ def main(config):
         make_metadata(config)
     if config.run_model:
 
-        # Data loader.
-        data_loader = get_loader(config)
-
         # Experiments
         experiments = [
             # 'spsp1',
@@ -53,6 +50,9 @@ def main(config):
                     config.dim_neck_2 = hparams[4]
                     config.dim_neck_3 = hparams[5] 
                     config.model_type = model_type
+
+                    # Data loader.
+                    data_loader = get_loader(config)
 
                     # Solver for training
                     solver = Solver(data_loader, config)

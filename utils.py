@@ -11,6 +11,7 @@ from scipy import signal
 from librosa.filters import mel
 from librosa.core import resample
 from librosa.util import fix_length
+from librosa.feature import mfcc
 from scipy.signal import get_window
 from math import pi, sqrt, exp
 import pyworld as pw
@@ -298,7 +299,16 @@ def get_spmel_filt(spmel):
     spmel_filt = np.abs(spmel_filt)
     spmel_filt = zero_one_norm(spmel_filt)
     spmel_filt = spmel_filt[:, :1]
+    
     return spmel_filt
+
+
+def get_mfcc(x, fs=16000, n_mfcc=40):
+    M = mfcc(x, fs, n_mfcc=n_mfcc, n_fft=1024, hop_length=256).T
+    M -= np.min(M)
+    M /= np.max(M)
+
+    return M
 
 
 def get_world_params(x, fs=16000):

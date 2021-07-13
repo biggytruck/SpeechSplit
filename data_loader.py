@@ -21,6 +21,7 @@ class Utterances(data.Dataset):
         self.spmel_filt_dir = os.path.join(self.root_dir, config.spmel_filt_dir)
         self.spenv_dir = os.path.join(self.root_dir, config.spenv_dir)
         self.spmel_mono_dir = os.path.join(self.root_dir, config.spmel_mono_dir)
+        self.mfcc_dir = os.path.join(self.root_dir, config.mfcc_dir)
         self.f0_dir = os.path.join(self.root_dir, config.f0_dir)
         self.experiment = config.experiment
         self.model_type = config.model_type
@@ -47,8 +48,9 @@ class Utterances(data.Dataset):
             spmel_filt = np.load(os.path.join(self.spmel_filt_dir, sbmt[2]))
             spmel_mono = np.load(os.path.join(self.spmel_mono_dir, sbmt[2]))
             spenv = np.load(os.path.join(self.spenv_dir, sbmt[2]))
+            mfcc = np.load(os.path.join(self.mfcc_dir, sbmt[2]))
             f0 = np.load(os.path.join(self.f0_dir, sbmt[2]))
-            uttrs[2] = ( wav, spmel, spmel_filt, spenv, spmel_mono, f0 )
+            uttrs[2] = ( wav, spmel, spmel_filt, spenv, spmel_mono, mfcc, f0 )
             dataset[k] = uttrs  
         
 
@@ -56,7 +58,7 @@ class Utterances(data.Dataset):
         list_uttrs = self.dataset[index]
         spk_id_org = list_uttrs[0]
         emb_org = list_uttrs[1]
-        wav, spmel, spmel_filt, spenv, spmel_mono, f0 = list_uttrs[2]
+        wav, spmel, spmel_filt, spenv, spmel_mono, mfcc, f0 = list_uttrs[2]
         if self.experiment == 'spsp1':
             rhythm_input = spmel
             content_input = spmel
