@@ -52,20 +52,8 @@ class Converter(object):
                 new_state_dict[k[7:]] = v
             self.G.load_state_dict(new_state_dict)
 
-        self.F = F0_Converter(self.config).eval().to(self.device)
-        ckpt = torch.load(os.path.join(self.model_save_dir, self.config.experiment, self.config.model_name+'-G-best.ckpt'))
-        try:
-            self.F.load_state_dict(ckpt['model'])
-        except:
-            new_state_dict = OrderedDict()
-            for k, v in ckpt['model'].items():
-                new_state_dict[k[7:]] = v
-            self.F.load_state_dict(new_state_dict)
-
-        # # use spsp1 pitch converter
-        # from script import Generator_6 as F0_Converter_ORI
-        # self.F = F0_Converter_ORI(self.config).eval().to(self.device)
-        # ckpt = torch.load(os.path.join(self.model_save_dir, 'spsp1/R_8_1-F-best.ckpt'))
+        # self.F = F0_Converter(self.config).eval().to(self.device)
+        # ckpt = torch.load(os.path.join(self.model_save_dir, self.config.experiment, self.config.model_name+'-G-best.ckpt'))
         # try:
         #     self.F.load_state_dict(ckpt['model'])
         # except:
@@ -108,7 +96,7 @@ class Converter(object):
             'F': [src_path, src_path, tgt_path, src_id],
             'U': [src_path, src_path, src_path, tgt_id],
         }
-        if self.experiment == 'spsp1':
+        if self.config.experiment == 'spsp1':
             rhythm_input = self._load_fea(self.spmel_dir, path_order[ctype][0])
             content_input = self._load_fea(self.spmel_dir, path_order[ctype][1])
             pitch_input = self._load_fea(self.f0_dir, path_order[ctype][2])
@@ -120,7 +108,7 @@ class Converter(object):
             content_input = self._load_fea(self.spmel_mono_dir, path_order[ctype][1])
             pitch_input = self._load_fea(self.f0_dir, path_order[ctype][2])
             if ctype == 'F':
-                pitch_input = self._convert_pitch(rhythm_input, pitch_input)
+                pitch_input = self._convert_pitch(rhythm_input[:, :, 1:], pitch_input)
             timbre_input = self._get_spk_emb(path_order[ctype][3])
         
         return rhythm_input, content_input, pitch_input, timbre_input
@@ -132,15 +120,15 @@ class Converter(object):
         pitch_input = np.pad(pitch_input, ((0,0), (0,T-pitch_input.shape[1]), (0,0)), 'constant')
         pitch_input_1d = inverse_quantize_f0_numpy(pitch_input[0])
 
-        rhythm_input = torch.from_numpy(rhythm_input).to(self.device)
-        content_input = torch.from_numpy(content_input).to(self.device)
-        pitch_input = torch.from_numpy(pitch_input).to(self.device)
-        timbre_input = torch.from_numpy(timbre_input).to(self.device)
-        content_pitch_input = torch.cat((content_input, rhythm_input), dim=-1)
+        rhythm_input = torch.FloatTensor(rhythm_input).to(self.device)
+        content_input = torch.FloatTensor(content_input).to(self.device)
+        pitch_input = torch.FloatTensor(pitch_input).to(self.device)
+        timbre_input = torch.FloatTensor(timbre_input).to(self.device)
+        content_pitch_input = torch.cat((content_input, pitch_input), dim=-1)
 
         rhythm_input_numpy = rhythm_input[0].cpu().numpy()
-        content_input_numpy = content_pitch_input[0][:, :-257].cpu().numpy()
-        pitch_input_numpy = content_pitch_input[0][:, -257:].cpu().numpy()
+        content_input_numpy = content_input[0].cpu().numpy()
+        pitch_input_numpy = pitch_input[0].cpu().numpy()
 
         rhythm_output = self.G.rhythm(rhythm_input)
         content_output, pitch_output = self.G.content_pitch(content_pitch_input, rr=False)
@@ -168,6 +156,18 @@ class Converter(object):
         spmel_list = []
         spmel_path_list = []
 
+        # use spsp1 pitch converter
+        from script import Generator_6 as F0_Converter_ORI
+        self.F = F0_Converter_ORI(self.config).eval().to(self.device)
+        ckpt = torch.load(os.path.join(self.model_save_dir, 'spsp1/R_8_1-F-best.ckpt'))
+        try:
+            self.F.load_state_dict(ckpt['model'])
+        except:
+            new_state_dict = OrderedDict()
+            for k, v in ckpt['model'].items():
+                new_state_dict[k[7:]] = v
+            self.F.load_state_dict(new_state_dict)
+
         with torch.no_grad():
             for experiment in experiments:
                 for model_name, params in settings.items():
@@ -181,6 +181,7 @@ class Converter(object):
                     self.config.dim_neck_2 = params[4]
                     self.config.dim_neck_3 = params[5]
 
+                    self.load_model()
     
                     for ctype in ctypes:
                         pairs = self.metadata[ctype]
@@ -207,7 +208,7 @@ class Converter(object):
                             spmel_list.append(torch.from_numpy(cvt_spmel))
                             spmel_path_list.append(cvt_spmel_path)
                             if ctype == 'F':
-                                pitch_input_1d_path = os.path.join(self.result_path, fname+'_t.npy')
+                                pitch_input_1d_path = os.path.join(result_path, fname+'_t.npy')
                                 np.save(pitch_input_1d_path, pitch_input_1d)
                             
                             # make plots
@@ -216,7 +217,9 @@ class Converter(object):
 
                             # plot input
                             src_f0 = np.load(os.path.join(self.f0_dir, src_name+'.npy'))
+                            src_f0 = quantize_f0_numpy(src_f0)[0]
                             tgt_f0 = np.load(os.path.join(self.f0_dir, tgt_name+'.npy'))
+                            tgt_f0 = quantize_f0_numpy(tgt_f0)[0]
                             images = inputs_numpy + [src_f0, tgt_f0]
                             names = ['Rhythm Input', 'Content Input', 'Pitch Input', 'Source Pitch', 'Target Pitch']
                             plot_path = os.path.join(self.plot_dir, experiment, model_name, ctype, fname+'_input.png')

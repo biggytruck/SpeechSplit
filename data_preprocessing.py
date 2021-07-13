@@ -68,7 +68,7 @@ def make_spect_f0(config):
             # normalize all f0s to be the local mean
             f0s = average_f0s(f0s, mode='local')
 
-        for wav, f0, sp, ap in zip(wavs, f0s, sps, aps):
+        for idx, (wav, f0, sp, ap) in enumerate(zip(wavs, f0s, sps, aps)):
 
             # compute spectrogram
             spmel = get_spmel(wav)
@@ -119,6 +119,7 @@ def make_spect_f0(config):
                                 fea_trunk.astype(np.float32), allow_pickle=False)
                         start_idx += 1
             else:
+                filename = sorted(file_list)[idx]
                 feas = [wav, spmel, spmel_filt, spenv, spmel_mono, f0_norm]
                 fea_dirs = [wav_dir, spmel_dir, spmel_filt_dir, spenv_dir, spmel_mono_dir, f0_dir]
                 for fea, fea_dir in zip(feas, fea_dirs):
